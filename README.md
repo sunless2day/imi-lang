@@ -80,6 +80,85 @@ These can't be overridden by user-declared functions (will produce a runtime err
 | `parse`    | turns a `str` into the most specific type it looks like, `int` first, then `float`, then `bool`. never fails, if nothing matches it just hands back the original string. pair it with `type` to check what you got                                                 |
 | `exit`     | stops the program right there. takes an optional `int` between 0 and 255 as the exit code, 0 if you don't give one                                                                                                                                                 |
 
+## Variables
+ 
+`let` declares a variable that can't be reassigned once initialized. `var` declares one that can.
+ 
+```rust
+let x = 5;
+x = 6; // ERROR, x is immutable
+ 
+var y = 5;
+y = 6; // fine
+```
+ 
+the type can be explicit or left for imi to infer from whatever you initialize it with.
+ 
+```rust
+let a: int = 5; // explicit
+let b = 5;       // inferred as int, same thing
+```
+ 
+### mutability belongs to the binding, not the data
+ 
+whether something can be changed is a property of the variable holding it, not the value itself. copy a value from a `let` into a `var` and it becomes fully mutable, copy it the other way and it becomes fully frozen. nothing about the value itself remembers where it came from.
+ 
+```rust
+let x = 10;
+var y = x;
+y = 15; // fine, y is var, doesn't matter that x was let
+ 
+var m = 10;
+let n = m;
+n = 15; // ERROR, n is let, doesn't matter that m was var
+```
+ 
+this applies to arrays too, all the way down. a `var` array of arrays is mutable at every level, a `let` one is frozen at every level, and copying one into the other flips that entirely.
+ 
+### copying is always by value
+ 
+assigning a variable to another, or passing it into a function, always makes a full independent copy. this includes arrays and strings, there's no shared reference sitting underneath like there would be in Python or JavaScript.
+ 
+```rust
+let a: array[int] = [1, 2, 3];
+var b = a;
+b.push(4);
+println("{}", len(a)); // 3, a is untouched
+println("{}", len(b)); // 4
+```
+
+if you're coming from a language where lists or objects are shared by reference (like Python or Javascript), then know that in imi, two variables never point at the same data, ever.
+
+### Scopes
+
+every { } block introduces its own scope. variables declared inside are local to that block and will shadow any variable with the same name from an outer scope.
+
+you can also redeclare a variable in the same scope using `let` or `var`, the new binding will replace the older one.
+
+```rust
+var a = 10;
+
+{
+    let b = a * 2;
+    println("{}", b); // prints 20
+
+    var b: str = "imi"; // redeclaring b in the same scope is fine, can be another type even
+    println("{}", b); // prints imi
+} // b dies here, a keeps living
+
+{
+    a += 15; // a is mutated
+}
+println("{}", a); // will print 25 since a got mutated in the inner scope
+
+{
+    let a = 50; // this new declaration overshadows the prior
+    println("{}", a); // prints 50
+} // the shadowing-declaration dies here
+
+println("{}", a); // a goes back to normal, prints 25
+```
+
 ahead are some examples of what imi can do and how it is implemented
 
 ## Hello, world
@@ -139,8 +218,7 @@ println("{}", "cat" == "dog"); // false
 For logic, imi spells things out instead of using symbols. there's no `&&`, `||` or `!`, just `and`, `or` and `not`.
 
 ```rust
-let age = 20; // `int` is being infered from the initializer's type
-
+let age = 20;
 if age >= 18 and age < 67 {
     println("you're an adult");
 }
@@ -218,6 +296,28 @@ println("{}", grid[1][2]); // 42
 let word = "hello";
 println("{}", word[0]);            // "h"
 println("{}", strslice(word, 1, 4)); // "ell"
+```
+
+### Arrays postfix methods
+
+Mutable arrays also support handy postfix methods like `.push()`, `.pop()`, and `.remove()`.
+
+```rust
+var fruits = ["apple", "banana", "cherry"];
+
+fruits.push("strawberry"); // now fruits contains ["apple", "banana", "cherry", "strawberry"], in that order
+
+let fruit = fruits.pop(); // `.pop()` pops the last element in an array and returns it
+
+let another_fruit = fruits.remove(1); // `.remove()` is like `.pop()` but it lets you remove an element by index
+
+println("{}\n{}\n{}", fruit, another_fruit, fruits);
+/*
+prints:
+strawberry
+banana
+[apple, cherry]
+*/
 ```
 
 ## What imi can't do (yet)
