@@ -126,7 +126,7 @@ LexResult lex(const char *source) {
 memory_error:
   free(tokens.tokens);
   return (LexResult){.status = LEX_ERROR,
-                     .error = {.position = i, .character = '\0'}};
+                     .error = {.position = i, .character = source[i]}};
 }
 
 // hehe, it says foid
