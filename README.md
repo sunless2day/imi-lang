@@ -5,7 +5,7 @@
 
 *this is part of yet another school project...*
 
-imi is a very simple and minimal language following a procedural and imperative paradigm. no OOP, no closures, no such nonsense.
+imi is a very simple and minimal language following a procedural and imperative paradigm.
 
 here is a little about imi as a language:
 
@@ -38,6 +38,7 @@ either way this gives you a binary called `imi`. if running `imi` afterward says
 ```sh
 export PATH="$HOME/.cargo/bin:$PATH"
 ```
+
 ***
 
 everything you need to know about the language lives in the spec that's part of this repository. I recommend reading it if you want the details of every single thing. everything past below this is just a summary of what imi-lang contains and is capable of.
@@ -81,7 +82,7 @@ let a: int = 5; // explicit
 let b = 5;       // inferred as int, same thing
 ```
 
-### mutability belongs to the binding, not the data
+### Mutability belongs to the binding, not the data
 
 whether something can be changed is a property of the variable holding it, not the value itself. copy a value from a `let` into a `var` and it becomes fully mutable, copy it the other way and it becomes fully frozen. nothing about the value itself remembers where it came from.
 
@@ -97,7 +98,7 @@ n = 15; // ERROR, n is let, doesn't matter that m was var
 
 this applies to arrays too, all the way down. a `var` array of arrays is mutable at every level, a `let` one is frozen at every level, and copying one into the other flips that entirely.
 
-### copying is always by value
+### Copying is always by value
 
 assigning a variable to another, or passing it into a function, always makes a full independent copy. this includes arrays and strings, there's no shared reference sitting underneath like there would be in Python or JavaScript.
 
@@ -109,13 +110,44 @@ println("{}", len(a)); // 3, a is untouched
 println("{}", len(b)); // 4
 ```
 
-if you're coming from a language where lists or objects are shared by reference, this is the biggest mental shift. in imi, two variables never point at the same data, ever.
+in imi, two variables never point at the same data, ever.
+
+### Scopes and shadowing
+
+every `{ }` block introduces its own scope. variables declared inside a block are local to that block and can shadow variables with the same name from an outer scope.
+
+a variable can also be redeclared in the same scope using `let` or `var`. the new binding replaces the previous one.
+
+```rust
+var a = 10;
+
+{
+    let b = a * 2;
+    println("{}", b); // prints 20
+
+    var b: str = "imi"; // redeclaring b in the same scope is fine
+    println("{}", b); // prints imi
+} // b goes out of scope here, a remains accessible
+
+{
+    a += 15; // a is mutated
+}
+
+println("{}", a); // prints 25
+
+{
+    let a = 50; // shadows the a from the outer scope
+    println("{}", a); // prints 50
+} // the shadowing declaration goes out of scope here
+
+println("{}", a); // a is accessible again, prints 25
+```
 
 ## Built-in functions
 
 These can't be overridden by user-declared functions (will produce a runtime error).
 
-| Function   | Description                                                                                                                                                                                                                                                        |
+| Function   | What it does                                                                                                                                                                                                                                                       |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `print`    | prints a formatted string to stdout, no newline included. one thing tho, whole `float`s print without their trailing `.0`, so `print("{}\n", 2.0)` prints `2` not `2.0`                                                                                            |
 | `println`  | same as `print` but adds a newline at the end                                                                                                                                                                                                                      |
@@ -132,13 +164,13 @@ These can't be overridden by user-declared functions (will produce a runtime err
 ahead are some examples of what imi can do and how it is implemented
 
 the first program anyone writes in any language, and imi is no exception.
- 
+
 ```rust
 println("Hello, world!");
 ```
- 
+
 `println` appends a newline for you. `print` doesn't, so you'd add it yourself:
- 
+
 ```rust
 print("Hello, world!\n");
 ```
@@ -175,7 +207,7 @@ println("{}", 7 % -3); // 1
 println("{}", 5 + 2.5); // 7.5
 ```
 
-Comparisons work the way you'd expect too.
+comparisons work the way you'd expect too.
 
 ```rust
 println("{}", 5 > 3);          // true
@@ -183,7 +215,7 @@ println("{}", 5 == 5.0);       // true, int and float can be compared directly
 println("{}", "cat" == "dog"); // false
 ```
 
-For logic, imi spells things out instead of using symbols. there's no `&&`, `||` or `!`, just `and`, `or` and `not`.
+for logic, imi spells things out instead of using symbols. there's no `&&`, `||` or `!`, just `and`, `or` and `not`.
 
 ```rust
 let age = 20; // `int` is being infered from the initializer's type
@@ -197,7 +229,7 @@ if not (age < 18) {
 }
 ```
 
-Normal precedence rules apply too, so `2 + 3 * 4` is `14`, not `20`. use parentheses whenever you want to be explicit about it.
+normal precedence rules apply too, so `2 + 3 * 4` is `14`, not `20`. use parentheses whenever you want to be explicit about it.
 
 ## Control Flow
 
@@ -239,7 +271,7 @@ let name = input("Enter your name: ");
 println("Hello, {}!", name);
 ```
 
-Note: the first argument to `print`/`println`/`format` must be a string literal. Using a string variable, or any other kind of expression, is illegal on purpose. Keep that in mind.
+note: the first argument to `print`/`println`/`format` must be a string literal. using a string variable, or any other kind of expression, is illegal on purpose. keep that in mind.
 
 ### A very simple calculator
 
@@ -258,7 +290,7 @@ println("{} + {} = {}", num1, num2, num1 + num2);
 
 ### FizzBuzz
 
-It can even solve LeetCode problems.
+it can even solve leetcode problems.
 
 ```rust
 // this is also how you declare a function in imi.
@@ -286,7 +318,7 @@ fn fizzbuzz(n: int) -> array[str] {
 
 ### Nested arrays and strings
 
-Arrays can hold other arrays, and strings can be indexed just like arrays.
+arrays can hold other arrays, and strings can be indexed just like arrays.
 
 ```rust
 var grid: array[array[int]] = [[1, 2, 3], [4, 5, 6]];
@@ -300,7 +332,7 @@ println("{}", strslice(word, 1, 4)); // "ell"
 
 ### Array methods
 
-Mutable arrays also ship with useful in-built methods: `.push()`, `.pop()`, and `.remove()`.
+mutable arrays also ship with useful in-built methods: `.push()`, `.pop()`, and `.remove()`.
 
 ```rust
 var fruits = ["apple", "banana", "cherry"];
@@ -325,12 +357,12 @@ banana
 
 `.push()` adds an element to the end of the array. `.pop()` removes and returns the last element, while `.remove()` removes and returns an element at a specified index.
 
-These methods can only be used on mutable arrays, using them on `let` arrays causes yet another runtime error.
+these methods can only be used on mutable arrays, using them on `let` arrays causes yet another runtime error.
 
 ## What imi can't do (yet)
 
-Read or write files. Haven't implemented that yet, but probably will at some point.
+read or write files. I haven't implemented that yet, but probably will at some point.
 
-Other than that I can't think of much it can't do. It's turing complete after all.
+other than that I can't think of much it can't do. It's turing complete after all.
 
 I wonder if anyone would ever implement imi-lang in imi-lang if something like `fread()` was ever added to the language.
