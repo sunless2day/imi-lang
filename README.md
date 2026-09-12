@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="imi-logo.png" alt="imi-lang logo" width="200">
+  <img src="imi-logo.png" alt="imi-lang logo" width="300">
   <h1>imi-lang</h1>
 </div>
 
