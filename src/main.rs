@@ -40,7 +40,7 @@ fn run(code: &str) -> Result<(), LangError> {
 fn main() -> ExitCode {
     let args: Vec<String> = args().skip(1).collect();
 
-    if args.len() != 1 {
+    if args.len() > 1 {
         eprintln!("imi only supports 1 argument.");
         return ExitCode::FAILURE;
     }
