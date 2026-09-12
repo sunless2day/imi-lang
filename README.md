@@ -262,6 +262,43 @@ if 0 { }      // will error at runtime, 0 is not a bool
 if n != 0 { } // this is fine
 ```
 
+## Functions
+ 
+functions can be called and declared anywhere in the file, order doesn't matter. declarations only work at the top level though, not nested inside another function or block. imi processes the whole file in two passes, first registering every function declaration, then running the actual program, so a function can be called before its own declaration even shows up further down.
+ 
+```rust
+println("{}", double(5)); // works fine even though double isn't declared yet
+ 
+fn double(n: int) -> int {
+    return n * 2;
+}
+```
+ 
+declaring two functions with the same name is an error, even if they'd never both actually get called.
+ 
+```rust
+fn greet() {
+    println("hi");
+}
+ 
+fn greet() { // ERROR, greet is already declared
+    println("hey");
+}
+```
+ 
+functions and variables live in completely separate namespaces, so a function and a variable can share the same name without any conflict at all.
+ 
+```rust
+fn foo() {
+    println("i'm a function");
+}
+ 
+let foo = 5; // fine, this is a totally different foo
+ 
+foo();               // calls the function, prints "i'm a function"
+println("{}", foo);  // reads the variable, prints 5
+```
+
 ## A few simple programs
 
 ### Greeter
