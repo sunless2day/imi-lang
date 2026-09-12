@@ -63,6 +63,40 @@ imi program.imi
 | `bool`     | just `true` or `false`, nothing fancier                                                                                        |
 | `array[T]` | a heap allocated list of `T`. every element must share the same type, and arrays can be nested so `array[array[int]]` is valid |
 
+## Built-in functions
+
+these can't be overridden by user-declared functions (will produce a runtime error).
+
+| Function   | What it does                                                                                                                                                                                                                                                       |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `print`    | prints a formatted string to stdout, no newline included. one thing tho, whole `float`s print without their trailing `.0`, so `print("{}\n", 2.0)` prints `2` not `2.0`                                                                                            |
+| `println`  | same as `print` but adds a newline at the end                                                                                                                                                                                                                      |
+| `format`   | same formatting rules as `print`/`println`, but hands the result back as a `str` instead of printing it                                                                                                                                                            |
+| `len`      | returns the length of a `str` or `array`, as an `int`. anything else, or the wrong number of arguments, is a runtime error                                                                                                                                         |
+| `strslice` | grabs a "slice" of a string (the returned string is technically a new string now). takes the string, a start index and an end index, start inclusive and end exclusive, so `strslice("hello world", 0, 5)` returns `"hello"`                                       |
+| `sleep`    | pauses the program for that many seconds, `int` or `float` both work, e.g. `sleep(2.5)` waits two and a half seconds. a negative duration is a runtime error                                                                                                       |
+| `type`     | the type of a value as a `str`, arrays included, e.g. `type(true)` is `"bool"` and `type([[3, 5], [10, 67]])` is `"array[array[int]]"`                                                                                                                             |
+| `elapsed`  | wall clock seconds since the program started, as a `float`. call it twice and subtract to time something                                                                                                                                                           |
+| `input`    | prints an "optional" prompt (with optional I mean that the string can be empty, the function still needs a single argument of type `str`), then reads a line from stdin as a `str`. the trailing newline is stripped, everything else the user typed is kept as is |
+| `parse`    | turns a `str` into the most specific type it looks like, `int` first, then `float`, then `bool`. never fails, if nothing matches it just hands back the original string. pair it with `type` to check what you got                                                 |
+| `exit`     | stops the program right there. takes an optional `int` between 0 and 255 as the exit code, 0 if you don't give one                                                                                                                                                 |
+
+ahead are some examples of what imi can do and how it is implemented
+
+## Hello, world
+
+the first program anyone writes in any language, and imi is no exception.
+
+```rust
+println("Hello, world!");
+```
+
+`println` appends a newline for you. `print` doesn't, so you'd add it yourself:
+
+```rust
+print("Hello, world!\n");
+```
+
 ## Variables
 
 `let` declares a variable that can't be reassigned. `var` declares one that can.
@@ -73,6 +107,13 @@ x = 6; // ERROR, x is immutable
 
 var y = 5;
 y = 6; // fine
+```
+
+there's also shorthand for updating a variable based on its current value, `+=`, `-=`, `*=`, `/=`, `^=` and `%=` all work.
+
+```rust
+var z = 10;
+z += 5; // z is now 15, same as z = z + 5
 ```
 
 the type can be explicit or left for imi to infer from whatever you initialize it with.
@@ -143,36 +184,27 @@ println("{}", a); // prints 25
 println("{}", a); // a is accessible again, prints 25
 ```
 
-## Built-in functions
+## Arrays
 
-these can't be overridden by user-declared functions (will produce a runtime error).
-
-| Function   | What it does                                                                                                                                                                                                                                                       |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `print`    | prints a formatted string to stdout, no newline included. one thing tho, whole `float`s print without their trailing `.0`, so `print("{}\n", 2.0)` prints `2` not `2.0`                                                                                            |
-| `println`  | same as `print` but adds a newline at the end                                                                                                                                                                                                                      |
-| `format`   | same formatting rules as `print`/`println`, but hands the result back as a `str` instead of printing it                                                                                                                                                            |
-| `len`      | returns the length of a `str` or `array`, as an `int`. anything else, or the wrong number of arguments, is a runtime error                                                                                                                                         |
-| `strslice` | grabs a "slice" of a string (the returned string is technically a new string now). takes the string, a start index and an end index, start inclusive and end exclusive, so `strslice("hello world", 0, 5)` returns `"hello"`                                       |
-| `sleep`    | pauses the program for that many seconds, `int` or `float` both work, e.g. `sleep(2.5)` waits two and a half seconds. a negative duration is a runtime error                                                                                                       |
-| `type`     | the type of a value as a `str`, arrays included, e.g. `type(true)` is `"bool"` and `type([[3, 5], [10, 67]])` is `"array[array[int]]"`                                                                                                                             |
-| `elapsed`  | wall clock seconds since the program started, as a `float`. call it twice and subtract to time something                                                                                                                                                           |
-| `input`    | prints an "optional" prompt (with optional I mean that the string can be empty, the function still needs a single argument of type `str`), then reads a line from stdin as a `str`. the trailing newline is stripped, everything else the user typed is kept as is |
-| `parse`    | turns a `str` into the most specific type it looks like, `int` first, then `float`, then `bool`. never fails, if nothing matches it just hands back the original string. pair it with `type` to check what you got                                                 |
-| `exit`     | stops the program right there. takes an optional `int` between 0 and 255 as the exit code, 0 if you don't give one                                                                                                                                                 |
-
-ahead are some examples of what imi can do and how it is implemented
-
-the first program anyone writes in any language, and imi is no exception.
+array literals look like `[value, value, ...]`, and every element has to be the same type.
 
 ```rust
-println("Hello, world!");
+let a = [1, 2, 3];       // inferred as array[int]
+let b = ["a", "b", "c"]; // inferred as array[str]
+let c = [1, "two"];      // ERROR, mixed types
 ```
 
-`println` appends a newline for you. `print` doesn't, so you'd add it yourself:
+mixing `int` and `float` in the same literal is the one exception, they all just get promoted to `float`.
 
 ```rust
-print("Hello, world!\n");
+let d = [1, 2.5, 3]; // becomes array[float], really [1.0, 2.5, 3.0]
+```
+
+an empty array has nothing to infer a type from, so it needs an explicit one.
+
+```rust
+var e: array[int] = []; // fine
+var f = [];              // ERROR, can't infer the type
 ```
 
 ## Doing some simple math
@@ -231,6 +263,15 @@ if not (age < 18) {
 
 normal precedence rules apply too, so `2 + 3 * 4` is `14`, not `20`. use parentheses whenever you want to be explicit about it.
 
+one tiny thing, unary `-` actually binds looser than `^` (I'm just following math rules here), so `-5 ^ 2` means `-(5 ^ 2)`, not `(-5) ^ 2`.
+
+```rust
+println("{}", -5 ^ 2);   // -25
+println("{}", (-5) ^ 2); // 25
+```
+
+there's no unary `+` for obvious reasons, writing `+5` isn't valid syntax.
+
 ## Control Flow
 
 `if`/`else` and `while` work about how you'd expect.
@@ -255,7 +296,7 @@ while i < 5 {
 
 `break` exits a loop, `continue` skips straight to the next iteration.
 
-one thing worth knowing, the condition in an `if` or `while` has to be a `bool`, no exceptions. imi has no concept of "truthiness" like Python or C have, so an `int` such as `0` or `1` can't be used as a condition directly.
+important notice: the condition in an `if` or `while` has to be a `bool`, no exceptions. imi has no concept of "truthiness" like Python or C have, so an `int` such as `0` or `1` can't be used as a condition directly.
 
 ```rust
 if 0 { }      // will error at runtime, 0 is not a bool
@@ -263,41 +304,43 @@ if n != 0 { } // this is fine
 ```
 
 ## Functions
- 
-functions can be called and declared anywhere in the file, order doesn't matter. declarations only work at the top level though, not nested inside another function or block. imi processes the whole file in two passes, first registering every function declaration, then running the actual program, so a function can be called before its own declaration even shows up further down.
- 
+
+functions can be called and declared anywhere in the file, order doesn't matter. declarations only work at the top level scope though, not nested inside another function or block. imi processes the whole file in two passes, first registering every function declaration, then running the actual program, so a function can be called before its own declaration even shows up further down.
+
 ```rust
 println("{}", double(5)); // works fine even though double isn't declared yet
- 
+
 fn double(n: int) -> int {
     return n * 2;
 }
 ```
- 
+
 declaring two functions with the same name is an error, even if they'd never both actually get called.
- 
+
 ```rust
 fn greet() {
     println("hi");
 }
- 
+
 fn greet() { // ERROR, greet is already declared
     println("hey");
 }
 ```
- 
+
 functions and variables live in completely separate namespaces, so a function and a variable can share the same name without any conflict at all.
- 
+
 ```rust
 fn foo() {
     println("i'm a function");
 }
- 
+
 let foo = 5; // fine, this is a totally different foo
- 
+
 foo();               // calls the function, prints "i'm a function"
 println("{}", foo);  // reads the variable, prints 5
 ```
+
+worth being clear on though, functions aren't values in imi. you can't store one in a variable, pass one as an argument, or return one from another function. `let f = foo;` isn't a thing, a function can only ever be reached by calling it directly by name.
 
 ## A few simple programs
 
