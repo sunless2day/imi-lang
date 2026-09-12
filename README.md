@@ -218,7 +218,7 @@ println("{}", "cat" == "dog"); // false
 for logic, imi spells things out instead of using symbols. there's no `&&`, `||` or `!`, just `and`, `or` and `not`.
 
 ```rust
-let age = 20; // `int` is being infered from the initializer's type
+let age = 20; // `int` is being inferred from the initializer's type
 
 if age >= 18 and age < 67 {
     println("you're an adult");
@@ -332,7 +332,7 @@ println("{}", strslice(word, 1, 4)); // "ell"
 
 ### Array methods
 
-mutable arrays also ship with useful in-built methods: `.push()`, `.pop()`, and `.remove()`.
+mutable arrays also ship with useful built-in methods: `.push()`, `.pop()`, and `.remove()`.
 
 ```rust
 var fruits = ["apple", "banana", "cherry"];
