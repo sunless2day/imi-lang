@@ -55,7 +55,7 @@ imi program.imi
 
 ## Types
 
-| Type       | Description                                                                                                                    |
+| Type       | What it does                                                                                                                   |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | `int`      | signed 64-bit integer                                                                                                          |
 | `float`    | 64-bit floating point number, aka a double                                                                                     |
@@ -145,7 +145,7 @@ println("{}", a); // a is accessible again, prints 25
 
 ## Built-in functions
 
-These can't be overridden by user-declared functions (will produce a runtime error).
+these can't be overridden by user-declared functions (will produce a runtime error).
 
 | Function   | What it does                                                                                                                                                                                                                                                       |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
