@@ -298,6 +298,35 @@ println("{}", word[0]);            // "h"
 println("{}", strslice(word, 1, 4)); // "ell"
 ```
 
+### Array methods
+
+Mutable arrays also ship with useful in-built methods: `.push()`, `.pop()`, and `.remove()`.
+
+```rust
+var fruits = ["apple", "banana", "cherry"];
+
+fruits.push("strawberry");
+// fruits is now ["apple", "banana", "cherry", "strawberry"]
+
+let fruit = fruits.pop();
+// `.pop()` removes and returns the last element
+
+let another_fruit = fruits.remove(1);
+// `.remove(n)` removes and returns the element at index n
+
+println("{}\n{}\n{}", fruit, another_fruit, fruits);
+/*
+prints:
+strawberry
+banana
+[apple, cherry]
+*/
+```
+
+`.push()` adds an element to the end of the array. `.pop()` removes and returns the last element, while `.remove()` removes and returns an element at a specified index.
+
+These methods can only be used on mutable arrays, using them on `let` arrays causes yet another runtime error.
+
 ## What imi can't do (yet)
 
 Read or write files. Haven't implemented that yet, but probably will at some point.
