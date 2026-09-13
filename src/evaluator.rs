@@ -808,21 +808,42 @@ impl Interpreter {
                 ))),
             },
             "fwrite" => match arg_values.as_slice() {
-                // this might be a little dangerous but fwrite WILL overwrite a file if it exists,
-                // otherwise it just creates it. this is a plain write, no append whatsoever
+                // "o" overwrites the file (creating it if it's missing), "a" appends to it
+                // (also creating it if it's missing). no default mode on purpose, silently
+                // overwriting a file is precisely the thing that requires an explicit option
                 // same error handling as fread
-                [Value::Str(path), Value::Str(contents)] => match std::fs::write(path, contents) {
-                    Ok(()) => Ok(Value::Void),
-                    Err(e) => Err(call_site.error(format!(
-                        "'fwrite' failed to write '{}' to '{}': {}",
-                        contents, path, e
-                    ))),
-                },
-                [Value::Str(_), v] => Err(call_site.error(format!(
-                    "'fwrite' expects (str, str), found (str, {}).",
+                [Value::Str(path), Value::Str(contents), Value::Str(mode)] => {
+                    let result = match mode.as_str() {
+                        "o" => std::fs::write(path, contents),
+                        "a" => std::fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(path)
+                            .and_then(|mut f| f.write_all(contents.as_bytes())),
+                        _ => {
+                            return Err(call_site.error(format!(
+                                "'fwrite' expects 'a' or 'o' as its mode, found '{}'.",
+                                mode
+                            )));
+                        }
+                    };
+                    match result {
+                        Ok(()) => Ok(Value::Void),
+                        Err(e) => Err(call_site.error(format!(
+                            "'fwrite' failed to write '{}' to '{}': {}",
+                            contents, path, e
+                        ))),
+                    }
+                }
+                [Value::Str(_), Value::Str(_), v] => Err(call_site.error(format!(
+                    "'fwrite' expects (str, str, str), found (str, str, {}).",
                     type_name(v)
                 ))),
-                [v, _] => Err(call_site.error(format!(
+                [Value::Str(_), v, _] => Err(call_site.error(format!(
+                    "'fwrite' expects (str, str, str), found (str, {}, ...).",
+                    type_name(v)
+                ))),
+                [v, _, _] => Err(call_site.error(format!(
                     "'fwrite' expects a str as its first argument, got {}.",
                     type_name(v)
                 ))),
