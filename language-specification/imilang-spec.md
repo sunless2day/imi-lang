@@ -846,15 +846,22 @@ println("{}", contents);
 ### `fwrite`
 
 ```text
-fwrite(path, contents)
+fwrite(path, contents, mode)
 ```
 
-Writes `contents` to the file at `path`, creating the file if it doesn't exist and overwriting it if it does. This is a plain write, not an append.
+Writes `contents` to the file at `path`. `mode` selects what happens to any existing content at that path, and must be exactly `"o"` or `"a"`:
 
-Both `path` and `contents` must be `str`. If the write fails, for any reason (the containing directory doesn't exist, permission is denied, and so on), this is a runtime error that terminates the program, reporting the underlying reason.
+* `"o"` overwrites the file, replacing its entire previous contents. Creates the file if it doesn't exist.
+* `"a"` appends `contents` to the end of the file instead of replacing anything. Also creates the file if it doesn't exist.
+
+There is no default mode. `mode` is a required argument specifically so that destroying a file's previous contents is never something that happens by accident, only as an explicit, visible choice at the call site.
+
+`path`, `contents`, and `mode` must all be `str`. Any `mode` other than `"o"` or `"a"` is a runtime error. If the write itself fails, for any other reason (the containing directory doesn't exist, permission is denied, and so on), that is also a runtime error that terminates the program, reporting the underlying reason.
 
 ```rust
-fwrite("output.txt", "hello from imi");
+fwrite("output.txt", "hello from imi\n", "o"); // output.txt now contains just this line
+fwrite("output.txt", "a second line\n", "a");  // output.txt now contains both lines
+fwrite("output.txt", "oops", "w");             // ERROR, 'w' is not a valid mode
 ```
 
 ## 11. Errors
@@ -947,6 +954,7 @@ Detected during execution, once the relevant expression or statement actually ru
 **Built-ins**
 * sleeping for a negative duration,
 * an `exit` code outside `0`–`255`.
+* an `fwrite` mode that isn't `"o"` or `"a"`.
 
 **Environment**
 * an underlying I/O failure unrelated to program logic — e.g. `input()` failing to read a line, output failing to flush, or `fread`/`fwrite` failing to read or write a file. These can occur even in a program with no bugs, since they stem from the surrounding environment rather than anything the program did.
