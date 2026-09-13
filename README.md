@@ -55,7 +55,7 @@ imi program.imi
 
 ## Types
 
-| Type       | What it does                                                                                                                   |
+| Type       | What it is                                                                                                                     |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | `int`      | signed 64-bit integer                                                                                                          |
 | `float`    | 64-bit floating point number, aka a double                                                                                     |
@@ -73,13 +73,15 @@ these can't be overridden by user-declared functions (will produce a runtime err
 | `println`  | same as `print` but adds a newline at the end                                                                                                                                                                                                                      |
 | `format`   | same formatting rules as `print`/`println`, but hands the result back as a `str` instead of printing it                                                                                                                                                            |
 | `len`      | returns the length of a `str` or `array`, as an `int`. anything else, or the wrong number of arguments, is a runtime error                                                                                                                                         |
-| `strslice` | grabs a "slice" of a string (the returned string is technically a new string now). takes the string, a start index and an end index, start inclusive and end exclusive, so `strslice("hello world", 0, 5)` returns `"hello"`                                       |
+| `strslice` | grabs a "slice" of a string (the returned string is technically a new string now) and returns it. takes the string, a start index and an end index, start inclusive and end exclusive, so `strslice("hello world", 0, 5)` returns `"hello"`                        |
 | `sleep`    | pauses the program for that many seconds, `int` or `float` both work, e.g. `sleep(2.5)` waits two and a half seconds. a negative duration is a runtime error                                                                                                       |
-| `type`     | the type of a value as a `str`, arrays included, e.g. `type(true)` is `"bool"` and `type([[3, 5], [10, 67]])` is `"array[array[int]]"`                                                                                                                             |
-| `elapsed`  | wall clock seconds since the program started, as a `float`. call it twice and subtract to time something                                                                                                                                                           |
+| `type`     | returns the type of a value as a `str`, arrays included, e.g. `type(true)` is `"bool"` and `type([[3, 5], [10, 67]])` is `"array[array[int]]"`                                                                                                                     |
+| `elapsed`  | returns wall clock seconds since the program started, as a `float`. call it twice and subtract to time something                                                                                                                                                   |
 | `input`    | prints an "optional" prompt (with optional I mean that the string can be empty, the function still needs a single argument of type `str`), then reads a line from stdin as a `str`. the trailing newline is stripped, everything else the user typed is kept as is |
 | `parse`    | turns a `str` into the most specific type it looks like, `int` first, then `float`, then `bool`. never fails, if nothing matches it just hands back the original string. pair it with `type` to check what you got                                                 |
 | `exit`     | stops the program right there. takes an optional `int` between 0 and 255 as the exit code, 0 if you don't give one                                                                                                                                                 |
+| `fread`    | reads a whole file and returns its contents as a `str`. if the file can't be read for any reason, that terminates the program with an explanation of what went wrong                                                                                               |
+| `fwrite`   | writes a `str` to a file, creating it if needed and overwriting it if it already exists, no append option. same deal as `fread`, any failure terminates the program with an explanation                                                                            |
 
 ahead are some examples of what imi can do and how it is implemented
 
@@ -109,7 +111,7 @@ var y = 5;
 y = 6; // fine
 ```
 
-there's also shorthand for updating a variable based on its current value, `+=`, `-=`, `*=`, `/=`, `^=` and `%=` all work.
+imi also supports compound operators such as `+=`, `-=`, `*=`, `/=`, `^=` and `%=`.
 
 ```rust
 var z = 10;
@@ -263,14 +265,14 @@ if not (age < 18) {
 
 normal precedence rules apply too, so `2 + 3 * 4` is `14`, not `20`. use parentheses whenever you want to be explicit about it.
 
-one tiny thing, unary `-` actually binds looser than `^` (I'm just following math rules here), so `-5 ^ 2` means `-(5 ^ 2)`, not `(-5) ^ 2`.
+one more gotcha, unary `-` actually binds looser than `^`, so `-5 ^ 2` means `-(5 ^ 2)`, not `(-5) ^ 2`.
 
 ```rust
 println("{}", -5 ^ 2);   // -25
 println("{}", (-5) ^ 2); // 25
 ```
 
-there's no unary `+` for obvious reasons, writing `+5` isn't valid syntax.
+there's no unary `+` either, writing `+5` isn't valid syntax.
 
 ## Control Flow
 
@@ -296,7 +298,7 @@ while i < 5 {
 
 `break` exits a loop, `continue` skips straight to the next iteration.
 
-important notice: the condition in an `if` or `while` has to be a `bool`, no exceptions. imi has no concept of "truthiness" like Python or C have, so an `int` such as `0` or `1` can't be used as a condition directly.
+one thing worth knowing, the condition in an `if` or `while` has to be a `bool`, no exceptions. imi has no concept of "truthiness" like Python or C have, so an `int` such as `0` or `1` can't be used as a condition directly.
 
 ```rust
 if 0 { }      // will error at runtime, 0 is not a bool
@@ -305,7 +307,7 @@ if n != 0 { } // this is fine
 
 ## Functions
 
-functions can be called and declared anywhere in the file, order doesn't matter. declarations only work at the top level scope though, not nested inside another function or block. imi processes the whole file in two passes, first registering every function declaration, then running the actual program, so a function can be called before its own declaration even shows up further down.
+functions can be called and declared anywhere in the file, order doesn't matter. declarations only work at the top level though, not nested inside another function or block. imi processes the whole file in two passes, first registering every function declaration, then running the actual program, so a function can be called before its own declaration even shows up further down.
 
 ```rust
 println("{}", double(5)); // works fine even though double isn't declared yet
@@ -439,10 +441,8 @@ banana
 
 these methods can only be used on mutable arrays, using them on `let` arrays causes yet another runtime error.
 
-## What imi can't do (yet)
+## What imi can't do (I suppose)
 
-read or write files. I haven't implemented that yet, but probably will at some point.
+honestly, not much comes to mind. it's turing complete after all.
 
-other than that I can't think of much it can't do. It's turing complete after all.
-
-I wonder if anyone would ever implement imi-lang in imi-lang if something like `fread()` was ever added to the language.
+I did wonder if anyone would ever implement imi-lang in imi-lang if `fread()` was ever added to the language. well, `fread()` and `fwrite()` are both a thing now, so that joke's on me.

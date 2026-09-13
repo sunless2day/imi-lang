@@ -24,11 +24,11 @@ use std::{
 /// so adding a builtin here automatically updates the parser's reserved list too
 pub const BUILTINS: &[&str] = &[
     "print", "println", "format", "len", "strslice", "sleep", "type", "elapsed", "input", "parse",
-    "exit",
+    "exit", "fread", "fwrite",
 ];
 
 /// how deep user recursion is allowed to go.
-/// deliberately conservative: each call in imi costs a surprising amount of rust stack
+/// conservative on purpose: each call in imi costs a surprising amount of rust stack
 /// (eval() itself recurses for every subexpression), and past this limit I'd rather
 /// report a clean error than let the process die with a native stack overflow
 const MAX_CALL_DEPTH: usize = 512;
@@ -648,7 +648,7 @@ impl Interpreter {
                     let chars: Vec<char> = s.chars().collect();
                     if start < 0 || end < start || end as usize > chars.len() {
                         return Err(call_site.error(format!(
-                            "'substr' range {}..{} out of bounds (str has {} characters).",
+                            "'strslice' range {}..{} out of bounds (str has {} characters).",
                             start,
                             end,
                             chars.len()
@@ -661,16 +661,16 @@ impl Interpreter {
                     ))
                 }
                 [Value::Str(_), a, b] => Err(call_site.error(format!(
-                    "'substr' expects (str, int, int), found ({}, {}).",
+                    "'strslice' expects (str, int, int), found ({}, {}).",
                     type_name(a),
                     type_name(b)
                 ))),
                 [v, _, _] => Err(call_site.error(format!(
-                    "'substr' expects a str as its first argument, found {}.",
+                    "'strslice' expects a str as its first argument, found {}.",
                     type_name(v)
                 ))),
                 _ => Err(call_site.error(format!(
-                    "'substr' expects 3 arguments, got {}.",
+                    "'strslice' expects 3 arguments, got {}.",
                     arg_values.len()
                 ))),
             },
@@ -786,6 +786,48 @@ impl Interpreter {
                 }
                 _ => Err(call_site.error(format!(
                     "'parse' expects 1 argument, got {}",
+                    arg_values.len()
+                ))),
+            },
+            "fread" => match arg_values.as_slice() {
+                // no special error handling beyond what std::fs::read_to_string offers us,
+                // it already returns a message containing the reason of why the function failed
+                // (file not found, permission denied, not valid UTF-8. etc...)
+                [Value::Str(path)] => match std::fs::read_to_string(path) {
+                    Ok(contents) => Ok(Value::Str(contents)),
+                    Err(e) => {
+                        Err(call_site.error(format!("'fread' failed to read '{}': {}", path, e)))
+                    }
+                },
+                [v] => {
+                    Err(call_site.error(format!("'fread' expects a str, found {}.", type_name(v))))
+                }
+                _ => Err(call_site.error(format!(
+                    "'fread' expects 1 argument, got {}.",
+                    arg_values.len()
+                ))),
+            },
+            "fwrite" => match arg_values.as_slice() {
+                // this might be a little dangerous but fwrite WILL overwrite a file if it exists,
+                // otherwise it just creates it. this is a plain write, no append whatsoever
+                // same error handling as fread
+                [Value::Str(path), Value::Str(contents)] => match std::fs::write(path, contents) {
+                    Ok(()) => Ok(Value::Void),
+                    Err(e) => Err(call_site.error(format!(
+                        "'fwrite' failed to write '{}' to '{}': {}",
+                        contents, path, e
+                    ))),
+                },
+                [Value::Str(_), v] => Err(call_site.error(format!(
+                    "'fwrite' expects (str, str), found (str, {}).",
+                    type_name(v)
+                ))),
+                [v, _] => Err(call_site.error(format!(
+                    "'fwrite' expects a str as its first argument, got {}.",
+                    type_name(v)
+                ))),
+                _ => Err(call_site.error(format!(
+                    "'fwrite' expects 2 arguments, got {}.",
                     arg_values.len()
                 ))),
             },
