@@ -606,6 +606,8 @@ elapsed
 input
 parse
 exit
+fread
+fwrite
 ```
 
 ## 10. Built-ins
@@ -826,6 +828,35 @@ require_positive(-5);
 println("This line never runs.");
 ```
 
+### `fread`
+
+```text
+fread(path)
+```
+
+Reads the entire contents of the file at `path` and returns it as a `str`.
+
+`path` must be a `str`. If the file cannot be read, for any reason (it doesn't exist, permission is denied, its contents aren't valid UTF-8, and so on), this is a runtime error that terminates the program, reporting the underlying reason.
+
+```rust
+let contents = fread("notes.txt");
+println("{}", contents);
+```
+
+### `fwrite`
+
+```text
+fwrite(path, contents)
+```
+
+Writes `contents` to the file at `path`, creating the file if it doesn't exist and overwriting it if it does. This is a plain write, not an append.
+
+Both `path` and `contents` must be `str`. If the write fails, for any reason (the containing directory doesn't exist, permission is denied, and so on), this is a runtime error that terminates the program, reporting the underlying reason.
+
+```rust
+fwrite("output.txt", "hello from imi");
+```
+
 ## 11. Errors
 
 Errors fall into three categories depending on which stage of the interpreter detects them: the lexer, the parser, or the evaluator. This distinction matters for anyone implementing the language, not just for users — a lexical or syntax error must be detected before a single statement runs, even in code that would never actually execute (an unreachable branch, a function that's never called), while a runtime error can only be detected once the relevant expression or statement is actually evaluated, since it depends on values that only exist during execution.
@@ -918,4 +949,4 @@ Detected during execution, once the relevant expression or statement actually ru
 * an `exit` code outside `0`–`255`.
 
 **Environment**
-* an underlying I/O failure unrelated to program logic — e.g. `input()` failing to read a line, or output failing to flush. These can occur even in a program with no bugs, since they stem from the surrounding environment rather than anything the program did.
+* an underlying I/O failure unrelated to program logic — e.g. `input()` failing to read a line, output failing to flush, or `fread`/`fwrite` failing to read or write a file. These can occur even in a program with no bugs, since they stem from the surrounding environment rather than anything the program did.
