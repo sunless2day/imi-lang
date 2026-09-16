@@ -53,6 +53,51 @@ imi program.imi
 
 `imi` only accepts exactly one argument and it has to end in `.imi`. no arguments, more than one, or the wrong extension, all of those are an error.
 
+## new additions to imi-lang!
+
+a friend of mine working on this project as well suggested a way to optimize the imi interpreter by using references under the hood. I thought about it for a bit and ended up with this:
+
+heap-backed data can now share the same underlying allocation through reference counting until one of the values needs to mutate it. the specific details are in the spec (like always), but in short:
+
+**imi's copy semantics are still intact. the underlying implementation is just free to optimize how those semantics are achieved.**
+
+```rust
+let s1 = "hello";
+// "hello" is allocated on the heap and s1 holds a reference-counted pointer to it.
+// so far, nothing strange.
+
+let s2 = s1;
+// instead of eagerly cloning "hello" into a second allocation,
+// s2 can share the same underlying string with s1.
+```
+
+so now `s1` and `s2` may point to the exact same data on the heap. from imi code, though, they still behave like completely independent values. you can pass them into functions, concatenate them, index them, format them, and so on exactly like before. ideally, you won't notice anything changed except that the interpreter has less unnecessary copying to do.
+
+now you may ask: okay, but what if `s2` is mutable and we try to mutate data that's currently shared by both variables?
+
+```rust
+let s1 = "hello";
+
+var s2 = s1;
+
+s2[4] = "👹";
+```
+
+at first glance you'd expect `s2` to mutate the same string that `s1` is looking at, which would also change the value behind an immutable binding. that would obviously break imi's existing semantics.
+
+instead, right before the mutation happens, `s2` gets its own private copy of the shared data. the mutation is then performed on that copy, while `s1` keeps pointing at the original `"hello"`.
+
+so after that:
+
+```rust
+println("{}", s1); // hello
+println("{}", s2); // hell👹
+```
+
+this is **copy-on-write**. earlier, heap-backed values were eagerly cloned whenever they were copied, even if neither copy was ever going to be mutated. now the interpreter can share the allocation for as long as that is safe, and only clone when a mutation actually makes it necessary.
+
+arrays use the same idea, including nested arrays. from the language's point of view nothing changed: assignment and function arguments still have value semantics, and mutating one copied value can never mutate another one by accident.
+
 ## Types
 
 | Type       | What it is                                                                                                                     |
@@ -67,20 +112,20 @@ imi program.imi
 
 these can't be overridden by user-declared functions (will produce a runtime error).
 
-| Function   | What it does                                                                                                                                                                                                                                                                                                               |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `print`    | prints a formatted string to stdout, no newline included. one thing tho, whole `float`s print without their trailing `.0`, so `print("{}\n", 2.0)` prints `2` not `2.0`                                                                                                                                                    |
-| `println`  | same as `print` but adds a newline at the end                                                                                                                                                                                                                                                                              |
-| `format`   | same formatting rules as `print`/`println`, but hands the result back as a `str` instead of printing it                                                                                                                                                                                                                    |
-| `len`      | returns the length of a `str` or `array`, as an `int`. anything else, or the wrong number of arguments, is a runtime error                                                                                                                                                                                                 |
-| `strslice` | grabs a "slice" of a string (the returned string is technically a new string now) and returns it. takes the string, a start index and an end index, start inclusive and end exclusive, so `strslice("hello world", 0, 5)` returns `"hello"`                                                                                |
-| `sleep`    | pauses the program for that many seconds, `int` or `float` both work, e.g. `sleep(2.5)` waits two and a half seconds. a negative duration is a runtime error                                                                                                                                                               |
-| `type`     | returns the type of a value as a `str`, arrays included, e.g. `type(true)` is `"bool"` and `type([[3, 5], [10, 67]])` is `"array[array[int]]"`                                                                                                                                                                             |
-| `elapsed`  | returns wall clock seconds since the program started, as a `float`. call it twice and subtract to time something                                                                                                                                                                                                           |
-| `input`    | prints an "optional" prompt (with optional I mean that the string can be empty, the function still needs a single argument of type `str`), then reads a line from stdin as a `str`. the trailing newline is stripped, everything else the user typed is kept as is                                                         |
-| `parse`    | turns a `str` into the most specific type it looks like, `int` first, then `float`, then `bool`. never fails, if nothing matches it just hands back the original string. pair it with `type` to check what you got                                                                                                         |
-| `exit`     | stops the program right there. takes an optional `int` between 0 and 255 as the exit code, 0 if you don't give one                                                                                                                                                                                                         |
-| `fread`    | reads a whole file and returns its contents as a `str`. if the file can't be read for any reason, that terminates the program with an explanation of what went wrong                                                                                                                                                       |
+| Function   | What it does                                                                                                                                                                                                                                                                                                                 |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `print`    | prints a formatted string to stdout, no newline included. one thing tho, whole `float`s print without their trailing `.0`, so `print("{}\n", 2.0)` prints `2` not `2.0`                                                                                                                                                      |
+| `println`  | same as `print` but adds a newline at the end                                                                                                                                                                                                                                                                                |
+| `format`   | same formatting rules as `print`/`println`, but hands the result back as a `str` instead of printing it                                                                                                                                                                                                                      |
+| `len`      | returns the length of a `str` or `array`, as an `int`. anything else, or the wrong number of arguments, is a runtime error                                                                                                                                                                                                   |
+| `strslice` | grabs a "slice" of a string (the returned string is technically a new string now) and returns it. takes the string, a start index and an end index, start inclusive and end exclusive, so `strslice("hello world", 0, 5)` returns `"hello"`                                                                                  |
+| `sleep`    | pauses the program for that many seconds, `int` or `float` both work, e.g. `sleep(2.5)` waits two and a half seconds. a negative duration is a runtime error                                                                                                                                                                 |
+| `type`     | returns the type of a value as a `str`, arrays included, e.g. `type(true)` is `"bool"` and `type([[3, 5], [10, 67]])` is `"array[array[int]]"`                                                                                                                                                                               |
+| `elapsed`  | returns wall clock seconds since the program started, as a `float`. call it twice and subtract to time something                                                                                                                                                                                                             |
+| `input`    | prints an "optional" prompt (with optional I mean that the string can be empty, the function still needs a single argument of type `str`), then reads a line from stdin as a `str`. the trailing newline is stripped, everything else the user typed is kept as is                                                           |
+| `parse`    | turns a `str` into the most specific type it looks like, `int` first, then `float`, then `bool`. never fails, if nothing matches it just hands back the original string. pair it with `type` to check what you got                                                                                                           |
+| `exit`     | stops the program right there. takes an optional `int` between 0 and 255 as the exit code, 0 if you don't give one                                                                                                                                                                                                           |
+| `fread`    | reads a whole file and returns its contents as a `str`. if the file can't be read for any reason, that terminates the program with an explanation of what went wrong                                                                                                                                                         |
 | `fwrite`   | writes a str to a file. takes a third argument, "o" to overwrite the file or "a" to append to it, no default, you have to pick one (e.g. `fwrite("path/to/file", "hello, from imi!", "o");`). either mode creates the file if it doesn't exist. same deal as `fread`, any failure terminates the program with an explanation |
 
 ahead are some examples of what imi can do and how it is implemented
@@ -143,7 +188,7 @@ this applies to arrays too, all the way down. a `var` array of arrays is mutable
 
 ### Copying is always by value
 
-assigning a variable to another, or passing it into a function, always makes a full independent copy. this includes arrays and strings, there's no shared reference sitting underneath like there would be in Python or JavaScript.
+assigning a variable to another, or passing it into a function, always makes a full independent copy. this includes arrays and strings, there's no shared reference sitting underneath like there would be in Python or JavaScript. (funnily enough, this explanation is no longer accurate and imi-lang is a sinner just like Python or JavaScript... I will keep this here for the record. feel free to clown me)
 
 ```rust
 let a: array[int] = [1, 2, 3];
@@ -153,7 +198,7 @@ println("{}", len(a)); // 3, a is untouched
 println("{}", len(b)); // 4
 ```
 
-in imi, two variables never point at the same data, ever.
+in imi, two variables never point at the same data, ever. (well, now they do, buddy. get whacked, lol)
 
 ### Scopes and shadowing
 
