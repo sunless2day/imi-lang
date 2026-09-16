@@ -2,8 +2,16 @@
 //! the real engine doing everything while the program is running.
 //! this module is large, indeed
 
+//! new changes have been added.
+//! I refactored the code a little and added some implementation-level optimizations.
+//! heap-allocated values can now be passed by reference,
+//! this is to avoid cloning heap data on every assignment or function call
+//! but we still have to respect the previous semantics...
+//! so I will try to implement this optimization
+//! without changing the practical behavior of the language
+
 // BTW
-// documenting this module was a pain...
+// documenting this module is still a pain...
 // I tried to make relevant docs while omitting the mundane parts
 
 use crate::{
@@ -15,6 +23,7 @@ use crate::{
 use std::{
     collections::HashMap,
     io::{self, Write},
+    rc::Rc,
     thread,
     time::{Duration, Instant},
 };
@@ -43,9 +52,9 @@ const MAX_CALL_DEPTH: usize = 512;
 pub enum Value {
     Int(i64),
     Float(f64),
-    Str(String),
+    Str(Rc<String>),
     Bool(bool),
-    Array(Vec<Value>),
+    Array(Rc<Vec<Value>>),
     Void,
     Uninitialized,
 }
@@ -70,6 +79,16 @@ enum MutPlace<'a> {
     StrChar(&'a mut String),
 }
 
+/// functions will also go through this `Rc` optimization.
+/// an entry is simply the function's parameters, optional return type and body.
+/// using a struct here instead of a tuple makes the call path a little easier to read
+/// without changing what a function actually stores.
+struct FnEntry {
+    params: Vec<Param>,
+    ret_type: Option<Type>,
+    body: Vec<StmtNode>,
+}
+
 /// functions belong to a different namespace than variables
 /// this is particularly relevant since things like:
 /// ```
@@ -77,13 +96,16 @@ enum MutPlace<'a> {
 ///
 /// let foo: int;
 /// ```
-/// are completely fine since the function `foo()` and variable foo
+/// are completely fine because the function `foo()` and variable `foo`
 /// are in different namespaces and don't collide with each other
 ///
 /// as you can see the hashmap simply consists of a `String` acting as the key
 /// and the data mapped to that key are the parameters, return type and statements
 /// of that function
-type FnTable = HashMap<String, (Vec<Param>, Option<Type>, Vec<StmtNode>)>;
+///
+/// now, we can wrap `FnEntry` in `Rc` so that every function call is a refcount bump instead of deep cloning the AST body.
+/// should be easy to implement since function's are read-only after being written to for the first time
+type FnTable = HashMap<String, Rc<FnEntry>>;
 
 /// the interpreter state: the function table, the program timer, and the recursion depth
 pub struct Interpreter {
@@ -121,8 +143,14 @@ impl Interpreter {
                 if self.functions.contains_key(name) {
                     return Err(stmt.error(format!("Function '{}' is already declared.", name)));
                 }
-                self.functions
-                    .insert(name.clone(), (params.clone(), ret.clone(), body.clone()));
+                self.functions.insert(
+                    name.clone(),
+                    Rc::new(FnEntry {
+                        params: params.clone(),
+                        ret_type: ret.clone(),
+                        body: body.clone(),
+                    }),
+                );
             }
         }
 
@@ -146,15 +174,33 @@ impl Interpreter {
         env: &mut Environment,
     ) -> Result<Outcome, LangError> {
         env.push_scope();
-        let mut result = Outcome::Normal;
+
+        let mut outcome = Outcome::Normal;
+        let mut error = None;
+
         for stmt in stmts {
-            result = self.exec_stmt(stmt, env)?;
-            if !matches!(result, Outcome::Normal) {
-                break;
+            match self.exec_stmt(stmt, env) {
+                Ok(next) => {
+                    outcome = next;
+                    if !matches!(outcome, Outcome::Normal) {
+                        break;
+                    }
+                }
+                Err(err) => {
+                    error = Some(err);
+                    break;
+                }
             }
         }
+
+        // scope is popped even when a statement errors. right now a LangError aborts the whole
+        // program anyway, but keeping the scope stack balanced makes this method more correct
         env.pop_scope();
-        Ok(result)
+
+        match error {
+            Some(err) => Err(err),
+            None => Ok(outcome),
+        }
     }
 
     /// the statement dispatcher: each arm evaluates what it needs
@@ -304,7 +350,8 @@ impl Interpreter {
         match lit {
             Literal::Int(n) => Ok(Value::Int(*n)),
             Literal::Float(f) => Ok(Value::Float(*f)),
-            Literal::Str(s) => Ok(Value::Str(s.clone())),
+            // str is a heap-allocated type, so we wrap it around Rc::new()
+            Literal::Str(s) => Ok(Value::Str(Rc::new(s.clone()))),
             Literal::Bool(b) => Ok(Value::Bool(*b)),
             Literal::Array(elements) => {
                 let mut values = Vec::with_capacity(elements.len());
@@ -331,7 +378,8 @@ impl Interpreter {
                         }
                     }
                 }
-                Ok(Value::Array(values))
+                // array is also a heap-allocated type, same thing as str
+                Ok(Value::Array(Rc::new(values)))
             }
         }
     }
@@ -344,7 +392,12 @@ impl Interpreter {
     ) -> Result<Value, LangError> {
         let val = self.eval(operand, env)?;
         match (op, val) {
-            (UnaryOp::Neg, Value::Int(n)) => Ok(Value::Int(-n)),
+            (UnaryOp::Neg, Value::Int(n)) => n.checked_neg().map(Value::Int).ok_or_else(|| {
+                operand.error(format!(
+                    "integer overflow: -({}) cannot be represented as int",
+                    n
+                ))
+            }),
             (UnaryOp::Neg, Value::Float(f)) => Ok(Value::Float(-f)),
             (UnaryOp::Neg, other) => Err(operand.error(format!(
                 "Cannot negate a value of type {}.",
@@ -407,18 +460,23 @@ impl Interpreter {
             Eq | NotEq | Lt | Gt | LtEq | GtEq => self
                 .eval_comparison(op, left, right)
                 .map_err(|e| l.error(e)),
-            And | Or => unreachable!(),
+            And | Or => Err(l.error(
+                "Internal evaluator error: logical operator reached ordinary binary evaluation.",
+            )),
         }
     }
 
     /// just an arithmetic helper: takes values, returns a value or a plain error String.
+    /// integer arithmetic stays checked all the way through, including negation/division edge cases,
+    /// so bad imi arithmetic becomes a LangError instead of a Rust panic.
     fn eval_arithmetic(&self, op: &BinaryOp, left: Value, right: Value) -> Result<Value, String> {
         use BinaryOp::*;
-        // str + str concatenates; str + anything-else is rejected
+
+        // str + str concatenates str + anything-else is rejected
         // (no implicit int-to-str, I implemented `format` for that)
         if let Add = op {
             if let (Value::Str(a), Value::Str(b)) = (&left, &right) {
-                return Ok(Value::Str(format!("{}{}", a, b)));
+                return Ok(Value::Str(Rc::new(format!("{}{}", a, b))));
             }
             if matches!(left, Value::Str(_)) || matches!(right, Value::Str(_)) {
                 return Err(format!(
@@ -429,100 +487,47 @@ impl Interpreter {
             }
         }
 
-        // int/int stays int (truncating, C-style: 7 / 2 == 3), and `%` is rust's
-        // remainder, which follows the dividend's sign (-7 % 3 == -1. python would say 2).
-        // deliberate, but worth writing down because every python-brained user will hit it
-        if let Div = op {
-            match (&left, &right) {
-                (Value::Int(a), Value::Int(b)) => {
-                    if *b == 0 {
-                        return Err("Division by zero is not allowed.".to_string());
-                    }
-                    return Ok(Value::Int(a / b));
-                }
-                // if either of the operands are a float, such as `float/int`,
-                // then both are cast as floats, this is to comply with the spec (I made this choice)
-                _ => {
-                    let a = as_f64(&left)?;
-                    let b = as_f64(&right)?;
-                    if b == 0.0 {
-                        return Err("Division by zero is not allowed.".to_string());
-                    }
-                    return Ok(Value::Float(a / b));
-                }
-            }
-        }
-
-        if let Mod = op {
-            match (&left, &right) {
-                (Value::Int(a), Value::Int(b)) => {
-                    if *b == 0 {
-                        return Err("Modulo by zero is not allowed.".to_string());
-                    }
-                    return Ok(Value::Int(a % b));
-                }
-                _ => {
-                    let a = as_f64(&left)?;
-                    let b = as_f64(&right)?;
-                    if b == 0.0 {
-                        return Err("Modulo by zero is not allowed.".to_string());
-                    }
-                    return Ok(Value::Float(a % b));
-                }
-            }
-        }
-
-        // checked arithmetic on purpose: overflow becomes a catchable LangError
-        // instead of silently wrapping (which is what plain `a + b` does in a release build)
         match (&left, &right) {
-            (Value::Int(a), Value::Int(b)) => {
-                let result = match op {
-                    Add => a.checked_add(*b),
-                    Sub => a.checked_sub(*b),
-                    Mul => a.checked_mul(*b),
-                    Pow => {
-                        if *b < 0 {
-                            return Err("Integer exponent must be non-negative. Use floats for negative exponents.".to_string());
-                        }
-                        // `b` is i64 but checked_pow wants u32.
-                        // without this guard, an exponent >= 2^32 silently truncates via `as u32` instead of erroring,
-                        // which gives WRONG answers rather than just failing loudly
-                        // (for example. 0 ^ 4294967296 would truncate the exponent to 0
-                        // and compute 0^0 == 1, instead of the correct 0)
-                        match u32::try_from(*b) {
-                            Ok(exp) => a.checked_pow(exp),
-                            Err(_) => {
-                                return Err(format!(
-                                    "integer exponent {} is too large (max {}).",
-                                    b,
-                                    u32::MAX
-                                ));
-                            }
-                        }
-                    }
-                    _ => unreachable!(), // Div/Mod were handled above
-                };
-                result.map(Value::Int).ok_or_else(|| {
-                    format!(
-                        "integer overflow: {} {:?} {} cannot be represented as int",
-                        a, op, b
-                    )
-                })
-            }
+            // int/int stays int. every operation here is guarded because i64 has a
+            // slightly evil edge case beyond the obvious +/* overflow: i64::MIN / -1
+            // cannot be represented. Rust also panics on i64::MIN % -1 even though the
+            // mathematical remainder is simply 0, so the integer helper handles that too.
+            (Value::Int(a), Value::Int(b)) => self.eval_int_arithmetic(op, *a, *b).map(Value::Int),
+
+            // if either operand is a float, both take the float path.
+            // this is imi's normal mixed numeric behavior.
             (Value::Int(_), Value::Float(_))
             | (Value::Float(_), Value::Int(_))
             | (Value::Float(_), Value::Float(_)) => {
                 let a = as_f64(&left)?;
                 let b = as_f64(&right)?;
+
                 let result = match op {
                     Add => a + b,
                     Sub => a - b,
                     Mul => a * b,
+                    Div => {
+                        if b == 0.0 {
+                            return Err("Division by zero is not allowed.".to_string());
+                        }
+                        a / b
+                    }
+                    Mod => {
+                        if b == 0.0 {
+                            return Err("Modulo by zero is not allowed.".to_string());
+                        }
+                        a % b
+                    }
                     Pow => a.powf(b),
-                    _ => unreachable!(), // Div was handled above
+                    _ => {
+                        return Err("Internal evaluator error: non-arithmetic operator reached arithmetic evaluation."
+                            .to_string());
+                    }
                 };
+
                 Ok(Value::Float(result))
             }
+
             _ => Err(format!(
                 "Cannot apply arithmetic to {} and {}.",
                 type_name(&left),
@@ -531,17 +536,70 @@ impl Interpreter {
         }
     }
 
+    /// integer-only arithmetic lives here so every i64 operation follows the same
+    /// checked-overflow policy instead of some operations accidentally using Rust's
+    /// panic/wrap behavior.
+    fn eval_int_arithmetic(&self, op: &BinaryOp, a: i64, b: i64) -> Result<i64, String> {
+        use BinaryOp::*;
+
+        let overflow = || {
+            format!(
+                "integer overflow: {} {:?} {} cannot be represented as int.",
+                a, op, b
+            )
+        };
+
+        match op {
+            Add => a.checked_add(b).ok_or_else(|| overflow()),
+            Sub => a.checked_sub(b).ok_or_else(|| overflow()),
+            Mul => a.checked_mul(b).ok_or_else(|| overflow()),
+            Div => {
+                if b == 0 {
+                    return Err("Division by zero is not allowed.".to_string());
+                }
+                a.checked_div(b).ok_or_else(|| overflow())
+            }
+            Mod => {
+                if b == 0 {
+                    return Err("Modulo by zero is not allowed.".to_string());
+                }
+                // Rust treats MIN % -1 as an overflow panic because the paired division overflows,
+                // but imi only needs the remainder here, which is exactly 0.
+                if a == i64::MIN && b == -1 {
+                    return Ok(0);
+                }
+                Ok(a % b)
+            }
+            Pow => {
+                if b < 0 {
+                    return Err(
+                        "Integer exponent must be non-negative. Use floats for negative exponents."
+                            .to_string(),
+                    );
+                }
+
+                // checked_pow wants u32. converting explicitly avoids exponent truncation.
+                let exp = u32::try_from(b).map_err(|_| {
+                    format!("integer exponent {} is too large (max {}).", b, u32::MAX)
+                })?;
+                a.checked_pow(exp).ok_or_else(|| overflow())
+            }
+            _ => unreachable!("yo idk bro, check line 588"),
+        }
+    }
+
     /// comparison helper, same deal as eval_arithmetic: no spans in here,
-    /// the caller attaches them
+    /// the caller attaches them.
     fn eval_comparison(&self, op: &BinaryOp, left: Value, right: Value) -> Result<Value, String> {
         use BinaryOp::*;
+
         let left_is_str = matches!(left, Value::Str(_));
         let right_is_str = matches!(right, Value::Str(_));
         let left_is_num = matches!(left, Value::Int(_) | Value::Float(_));
         let right_is_num = matches!(right, Value::Int(_) | Value::Float(_));
 
-        // equality between a str and a number is simply false (it never errors),
-        // but ordering them is an error — "5" < 3 has no meaning we want to invent
+        // equality between a str and a number is simply false (not an errors),
+        // but ordering them is an error. "5" < 3 genuinely makes no sense
         if (left_is_str && right_is_num) || (left_is_num && right_is_str) {
             return match op {
                 Eq => Ok(Value::Bool(false)),
@@ -551,8 +609,19 @@ impl Interpreter {
         }
 
         let result = match (&left, &right) {
-            (Value::Int(_), Value::Int(_))
-            | (Value::Int(_), Value::Float(_))
+            (Value::Int(a), Value::Int(b)) => match op {
+                Eq => a == b,
+                NotEq => a != b,
+                Lt => a < b,
+                Gt => a > b,
+                LtEq => a <= b,
+                GtEq => a >= b,
+                _ => unreachable!("something went wrong when ordering integers"),
+            },
+
+            // mixed int/float comparisons intentionally go through f64 because a float
+            // is already involved in the operation.
+            (Value::Int(_), Value::Float(_))
             | (Value::Float(_), Value::Int(_))
             | (Value::Float(_), Value::Float(_)) => {
                 let a = as_f64(&left)?;
@@ -564,23 +633,23 @@ impl Interpreter {
                     Gt => a > b,
                     LtEq => a <= b,
                     GtEq => a >= b,
-                    _ => unreachable!(),
+                    _ => unreachable!("something went wrong when ordering integers and floats"),
                 }
             }
+
             (Value::Str(a), Value::Str(b)) => match op {
                 Eq => a == b,
                 NotEq => a != b,
-                Lt => a < b,
-                Gt => a > b,
-                LtEq => a <= b,
-                GtEq => a >= b,
-                _ => unreachable!(),
+                Lt | Gt | LtEq | GtEq => return Err("Cannot order a string with another string. Strings only support equality comparisons.".to_string()),
+                _ => unreachable!("something went wrong when ordering strings"),
             },
+
             (Value::Bool(a), Value::Bool(b)) => match op {
                 Eq => a == b,
                 NotEq => a != b,
                 _ => return Err("Ordering is not defined for bool.".to_string()),
             },
+
             _ => {
                 return Err(format!(
                     "cannot compare {} and {}",
@@ -589,8 +658,26 @@ impl Interpreter {
                 ));
             }
         };
+
         Ok(Value::Bool(result))
     }
+
+    /// cool new helper below:
+    /// evaluates call arguments strictly left to right.
+    /// both ordinary function calls and array methods use this helper so they agree
+    /// on evaluation order without copy-pasting the same loop.
+    fn eval_arguments(
+        &mut self,
+        args: &[ExprNode],
+        env: &mut Environment,
+    ) -> Result<Vec<Value>, LangError> {
+        let mut values = Vec::with_capacity(args.len());
+        for arg in args {
+            values.push(self.eval(arg, env)?);
+        }
+        Ok(values)
+    }
+
     fn eval_call(
         &mut self,
         name: &str,
@@ -600,17 +687,28 @@ impl Interpreter {
     ) -> Result<Value, LangError> {
         // all arguments are evaluated before dispatch, strictly left to right,
         // even for builtins that might not need them all
-        let mut arg_values = Vec::with_capacity(args.len());
-        for a in args {
-            arg_values.push(self.eval(a, env)?);
-        }
+        let arg_values = self.eval_arguments(args, env)?;
 
-        // finally, the built-in functions.
-        // each arm does its own arity/type checking,
-        // because imi has no static function signatures to lean on
+        if BUILTINS.contains(&name) {
+            self.eval_builtin(name, &arg_values, call_site)
+        } else {
+            self.call_user_function(name, arg_values, call_site)
+        }
+    }
+
+    /// built-ins live inside an isolated method instead of sharing eval_call with user functions.
+    /// keeping this as one method seemed like a necessary refactor for this huge mess of a module
+    fn eval_builtin(
+        &mut self,
+        name: &str,
+        arg_values: &[Value],
+        call_site: &ExprNode,
+    ) -> Result<Value, LangError> {
+        // each arm does its own arity/type checking because imi has no static
+        // function signatures to lean on at runtime.
         match name {
             "println" | "print" | "format" => {
-                let s = self.do_format(&arg_values, call_site)?;
+                let s = self.do_format(arg_values, call_site)?;
                 match name {
                     // println!/print! panic if stdout is closed (e.g. piping into `head`),
                     // so we write through io::stdout() and ignore the error instead,
@@ -622,15 +720,19 @@ impl Interpreter {
                         let _ = write!(io::stdout(), "{}", s);
                         io::stdout().flush().ok();
                     }
-                    "format" => return Ok(Value::Str(s)),
-                    _ => unreachable!(),
+                    "format" => return Ok(Value::Str(Rc::new(s))),
+                    _ => {
+                        return Err(call_site.error(
+                            "Internal evaluator error: invalid formatting builtin dispatch.",
+                        ));
+                    }
                 }
                 // functions like print and println have nothing relevant to return,
                 // unlike format (that returns a formatted string).
                 // we end up returning Void anyway to have something to return (see docs in Value)
                 Ok(Value::Void)
             }
-            "len" => match arg_values.as_slice() {
+            "len" => match arg_values {
                 [Value::Str(s)] => Ok(Value::Int(s.chars().count() as i64)),
                 [Value::Array(items)] => Ok(Value::Int(items.len() as i64)),
                 [v] => Err(call_site.error(format!(
@@ -642,7 +744,7 @@ impl Interpreter {
                     arg_values.len()
                 ))),
             },
-            "strslice" => match arg_values.as_slice() {
+            "strslice" => match arg_values {
                 [Value::Str(s), Value::Int(start), Value::Int(end)] => {
                     let (start, end) = (*start, *end);
                     let chars: Vec<char> = s.chars().collect();
@@ -655,10 +757,10 @@ impl Interpreter {
                         )));
                     }
                     // i'm pretty sure type casting an i64 to usize COULD cause trouble in very niche cases
-                    // I trust the conditions above are enough to block any incoming bugs (fingers crossed)
-                    Ok(Value::Str(
+                    // I trust the conditions above are enough to disallow any incoming bugs (fingers crossed)
+                    Ok(Value::Str(Rc::new(
                         chars[start as usize..end as usize].iter().collect(),
-                    ))
+                    )))
                 }
                 [Value::Str(_), a, b] => Err(call_site.error(format!(
                     "'strslice' expects (str, int, int), found ({}, {}).",
@@ -675,11 +777,11 @@ impl Interpreter {
                 ))),
             },
 
-            "sleep" => match arg_values.as_slice() {
+            "sleep" => match arg_values {
                 [v] => {
                     let secs = as_f64(v).map_err(|e| call_site.error(e))?;
                     // from_secs_f64 panics on negative, NaN and absurdly huge values,
-                    // and I want every possible error to be a LangError instead of Rust's runtime panics
+                    // and I want every possible error (at the language-level) to be a LangError instead of Rust's runtime panics
                     if !(0.0..=Duration::MAX.as_secs_f64()).contains(&secs) {
                         return Err(
                             call_site.error(format!("'sleep' can't sleep for {} seconds.", secs))
@@ -693,23 +795,26 @@ impl Interpreter {
                     arg_values.len()
                 ))),
             },
-            "type" => match arg_values.as_slice() {
-                [v] => Ok(Value::Str(value_type_name(v))),
+            "type" => match arg_values {
+                [v] => Ok(Value::Str(Rc::new(value_type_name(v)))),
                 _ => Err(call_site.error(format!(
                     "'type' expects 1 argument, got {}.",
                     arg_values.len()
                 ))),
             },
-            "elapsed" => match arg_values.as_slice() {
+            "elapsed" => match arg_values {
                 [] => Ok(Value::Float(self.start.elapsed().as_secs_f64())),
                 _ => Err(call_site.error(format!(
                     "'elapsed' expects 0 arguments, got {}.",
                     arg_values.len()
                 ))),
             },
-            "input" => match arg_values.as_slice() {
+            "input" => match arg_values {
                 [Value::Str(prompt)] => {
-                    print!("{}", prompt);
+                    // unlike print!, write! gives us the I/O error instead of panicking,
+                    // so input() can keep the evaluator's "runtime failures become LangError" rule.
+                    write!(io::stdout(), "{}", prompt)
+                        .map_err(|e| call_site.error(format!("Failed to write prompt: {}", e)))?;
                     io::stdout()
                         .flush()
                         .map_err(|e| call_site.error(format!("Failed to flush stdout: {}", e)))?;
@@ -720,7 +825,9 @@ impl Interpreter {
                         .map_err(|e| call_site.error(format!("Failed to read input: {}", e)))?;
 
                     // strips the trailing newline, and '\r' too so CRLF on windows doesn't sneak into the value
-                    Ok(Value::Str(input.trim_end_matches(['\n', '\r']).to_string()))
+                    Ok(Value::Str(Rc::new(
+                        input.trim_end_matches(['\n', '\r']).to_string(),
+                    )))
                 }
                 [v] => {
                     Err(call_site.error(format!("'input' expects a 'str', got {}.", type_name(v))))
@@ -731,7 +838,7 @@ impl Interpreter {
                 ))),
             },
             "exit" => {
-                let code = match arg_values.as_slice() {
+                let code = match arg_values {
                     [] => 0,
                     [Value::Int(n)] => {
                         if *n < 0 || *n > 255 {
@@ -754,12 +861,12 @@ impl Interpreter {
                     }
                 };
                 // yeah... this just kills the process. no LangError, no panic, just death.
-                // I make an exception from the every error should be a LangError rule
+                // I make an exception from the "every error should be a LangError" rule
                 // for this function because it quite literally is a process killer
                 io::stdout().flush().ok();
                 std::process::exit(code);
             }
-            "parse" => match arg_values.as_slice() {
+            "parse" => match arg_values {
                 [Value::Str(s)] => {
                     // never fails by design:
                     // anything it can't parse comes back as the original string.
@@ -773,9 +880,9 @@ impl Interpreter {
                         } else {
                             Ok(Value::Str(s.clone()))
                         }
-                    } else if s == "true" {
+                    } else if s.as_str() == "true" {
                         Ok(Value::Bool(true))
-                    } else if s == "false" {
+                    } else if s.as_str() == "false" {
                         Ok(Value::Bool(false))
                     } else {
                         Ok(Value::Str(s.clone()))
@@ -789,12 +896,12 @@ impl Interpreter {
                     arg_values.len()
                 ))),
             },
-            "fread" => match arg_values.as_slice() {
+            "fread" => match arg_values {
                 // no special error handling beyond what std::fs::read_to_string offers us,
                 // it already returns a message containing the reason of why the function failed
                 // (file not found, permission denied, not valid UTF-8. etc...)
-                [Value::Str(path)] => match std::fs::read_to_string(path) {
-                    Ok(contents) => Ok(Value::Str(contents)),
+                [Value::Str(path)] => match std::fs::read_to_string(path.as_str()) {
+                    Ok(contents) => Ok(Value::Str(Rc::new(contents))),
                     Err(e) => {
                         Err(call_site.error(format!("'fread' failed to read '{}': {}", path, e)))
                     }
@@ -807,18 +914,18 @@ impl Interpreter {
                     arg_values.len()
                 ))),
             },
-            "fwrite" => match arg_values.as_slice() {
+            "fwrite" => match arg_values {
                 // "o" overwrites the file (creating it if it's missing), "a" appends to it
                 // (also creating it if it's missing). no default mode on purpose, silently
                 // overwriting a file is precisely the thing that requires an explicit option
                 // same error handling as fread
                 [Value::Str(path), Value::Str(contents), Value::Str(mode)] => {
                     let result = match mode.as_str() {
-                        "o" => std::fs::write(path, contents),
+                        "o" => std::fs::write(path.as_str(), contents.as_bytes()),
                         "a" => std::fs::OpenOptions::new()
                             .create(true)
                             .append(true)
-                            .open(path)
+                            .open(path.as_str())
                             .and_then(|mut f| f.write_all(contents.as_bytes())),
                         _ => {
                             return Err(call_site.error(format!(
@@ -847,12 +954,16 @@ impl Interpreter {
                     "'fwrite' expects a str as its first argument, got {}.",
                     type_name(v)
                 ))),
+                // damn, seems like I forgot to change the error message
                 _ => Err(call_site.error(format!(
-                    "'fwrite' expects 2 arguments, got {}.",
+                    "'fwrite' expects 3 arguments, got {}.",
                     arg_values.len()
                 ))),
             },
-            _ => self.call_user_function(name, arg_values, call_site),
+            _ => Err(call_site.error(format!(
+                "Internal evaluator error: '{}' is not a registered builtin.",
+                name
+            ))),
         }
     }
 
@@ -890,19 +1001,20 @@ impl Interpreter {
         arg_values: Vec<Value>,
         call_site: &ExprNode,
     ) -> Result<Value, LangError> {
-        // the clone looks wasteful but it's the standard borrow-checker workaround:
-        // self.functions is borrowed here while exec_block needs a mutable reference of self.
-        let (params, ret_type, body) = match self.functions.get(name) {
-            Some(f) => f.clone(),
-            None => {
-                return Err(call_site.error(format!("Call to undeclared function '{}'.", name)));
-            }
-        };
-        if params.len() != arg_values.len() {
+        // no more clone! well... you still see `Rc::clone()`, but that's different from a standard clone.
+        // `Rc::clone()` just clones the pointer and bumps the refcounter, but never the data.
+        // this is a huge performance gain
+        let entry =
+            self.functions.get(name).cloned().ok_or_else(|| {
+                call_site.error(format!("Call to undeclared function '{}'.", name))
+            })?;
+
+        let entry = entry.as_ref();
+        if entry.params.len() != arg_values.len() {
             return Err(call_site.error(format!(
                 "'{}' expected {} argument(s), got {}.",
                 name,
-                params.len(),
+                entry.params.len(),
                 arg_values.len()
             )));
         }
@@ -910,7 +1022,9 @@ impl Interpreter {
         // their parameters. (recursion still works because the FnTable lives on
         // the Interpreter, not inside any Environment)
         let mut call_env = Environment::new();
-        for (param, value) in params.iter().zip(arg_values.into_iter()) {
+        for (param, value) in entry.params.iter().zip(arg_values.into_iter()) {
+            // int -> float coercion at the parameter boundary, had to add this atp
+            let value = coerce_value_to_type(value, &param.ty);
             if !value_matches_type(&value, &param.ty) {
                 return Err(call_site.error(format!(
                     "'{}' expected {} for parameter '{}', got {}.",
@@ -923,29 +1037,28 @@ impl Interpreter {
             // params are born mutable (no let/var distinction inside a signature)
             call_env.declare(param.name.clone(), value, param.ty.clone(), true);
         }
-        match self.exec_block(&body, &mut call_env)? {
+        match self.exec_block(&entry.body, &mut call_env)? {
             Outcome::Return(Some(v)) => {
-                match &ret_type {
-                    Some(t) if !value_matches_type(&v, t) => {
-                        return Err(call_site.error(format!(
-                            "'{}': return type mismatch. expected {}, got {}.",
-                            name,
-                            t,
-                            value_type_name(&v)
-                        )));
-                    }
-                    None => {
-                        return Err(call_site.error(format!(
-                            "'{}': returned a value but has no declared return type.",
-                            name
-                        )));
-                    }
-                    _ => {}
+                let Some(t) = &entry.ret_type else {
+                    return Err(call_site.error(format!(
+                        "'{}': returned a value but has no declared return type.",
+                        name
+                    )));
+                };
+                // int -> float just like above
+                let v = coerce_value_to_type(v, t);
+                if !value_matches_type(&v, t) {
+                    return Err(call_site.error(format!(
+                        "'{}': return type mismatch. expected {}, got {}.",
+                        name,
+                        t,
+                        value_type_name(&v)
+                    )));
                 }
                 Ok(v)
             }
             Outcome::Return(None) => {
-                if ret_type.is_some() {
+                if entry.ret_type.is_some() {
                     return Err(call_site.error(format!(
                         "'{}': declared a return type but returned no value.",
                         name
@@ -956,7 +1069,7 @@ impl Interpreter {
             // falling off the end of a function with a declared return type is a hard error
             // imi has no implicit "return void" on fall-through
             Outcome::Normal => {
-                if ret_type.is_some() {
+                if entry.ret_type.is_some() {
                     return Err(call_site.error(format!(
                         "'{}': missing return. Execution reached the end of the function without returning a value.",
                         name
@@ -970,37 +1083,21 @@ impl Interpreter {
         }
     }
 
-    /// indexes into an array
-    /// earlier, I would CLONE the whole array just to fetch a single value
-    /// and then discard the cloned array... which is a huge performance loss
-    /// it got later optimizied by simply accessing the intended index by reference
-    /// and the cloning that single value instead of the whole array
+    /// indexes into an array or string.
+    ///
+    /// before `Value::Array` used Rc, there was a special fast path for a plain variable
+    /// so indexing wouldn't deep-clone the whole array just to read one element. that
+    /// optimization is obsolete now: cloning a Value only bumps the Rc, so we can evaluate
+    /// the target normally and preserve the natural target-before-index evaluation order
     fn eval_index(
         &mut self,
         target: &ExprNode,
         index: &ExprNode,
         env: &mut Environment,
     ) -> Result<Value, LangError> {
-        if let Expr::Variable(name) = &target.node {
-            let idx = self.eval(index, env)?;
-
-            let value = match env.get(name) {
-                Some(Value::Uninitialized) => {
-                    return Err(target.error(format!(
-                        "Variable '{}' used before being assigned a value.",
-                        name
-                    )));
-                }
-                Some(v) => v,
-                None => return Err(target.error(format!("Undeclared variable '{}'.", name))),
-            };
-
-            return index_into(value, &idx, target, index);
-        }
-
-        let arr = self.eval(target, env)?;
+        let value = self.eval(target, env)?;
         let idx = self.eval(index, env)?;
-        index_into(&arr, &idx, target, index)
+        index_into(&value, &idx, target, index)
     }
 
     /// half of the lvalue machinery: flattens an index chain like `matrix[i][j]`
@@ -1008,7 +1105,7 @@ impl Interpreter {
     /// they're collected, left to right.
     /// this exists because you can't mutate through an evaluated COPY of an array,
     /// exec_index_assign and eval_method_call need a mutable PATH back to the root
-    /// binding, which is what get_array_binding_mut reconstructs from this
+    /// binding, which is what get_indexable_binding_mut reconstructs from this
     fn collect_indices(
         &mut self,
         target: &ExprNode,
@@ -1099,6 +1196,11 @@ impl Interpreter {
             let Value::Array(items) = current_val else {
                 return Err(target.error("Target is not an array."));
             };
+            // clone-on-write: only actually clones this container if it's
+            // currently shared (reference count > 1).
+            // a sibling branch nobody is touching never gets cloned,
+            // only the spine down to the mutated branch
+            let items = Rc::make_mut(items);
 
             if i < 0 || i as usize >= items.len() {
                 return Err(target.error(format!(
@@ -1117,21 +1219,24 @@ impl Interpreter {
                 let Value::Array(items) = current_val else {
                     return Err(target.error("Target is not an array."));
                 };
-                Ok(MutPlace::ArrayElem(items, *inner))
+                Ok(MutPlace::ArrayElem(Rc::make_mut(items), *inner))
             }
             Type::Str => {
                 let Value::Str(s) = current_val else {
                     return Err(target.error("Target is not a string."));
                 };
-                Ok(MutPlace::StrChar(s))
+                Ok(MutPlace::StrChar(Rc::make_mut(s)))
             }
-            // anything that isn't a string or an array gets caught before reaching this
-            _ => unreachable!(),
+            // landing on a primitive here means the source tried to keep indexing or
+            // call an array method after the path had already reached a scalar value
+            //
+            // basically, indexing a primitive is bad bad and it triggers a runtime error
+            _ => Err(target.error("Cannot mutate or call an array method on a non-array value.")),
         }
     }
 
-    /// array methods (push/pop/remove). note the order of operations: ALL arguments
-    /// are evaluated BEFORE the mutable borrow of the target binding is taken.
+    /// array methods (push/pop/remove). note the order of operations:
+    /// ALL arguments are evaluated BEFORE the mutable borrow of the target binding is taken.
     /// that's load-bearing, it's why `a.push(a.pop())` works, the borrows never overlap
     fn eval_method_call(
         &mut self,
@@ -1143,10 +1248,7 @@ impl Interpreter {
         let mut target_indices = Vec::new();
         let root_name = self.collect_indices(target, env, &mut target_indices)?;
 
-        let mut arg_values = Vec::with_capacity(args.len());
-        for a in args {
-            arg_values.push(self.eval(a, env)?);
-        }
+        let arg_values = self.eval_arguments(args, env)?;
 
         let (items, inner_ty) =
             match self.get_indexable_binding_mut(target, &root_name, &target_indices, env)? {
@@ -1160,13 +1262,13 @@ impl Interpreter {
 
         match method {
             "push" => {
-                if arg_values.len() != 1 {
+                let [v] = arg_values.as_slice() else {
                     return Err(target.error(format!(
                         "'push' expects exactly 1 argument, got {}.",
                         arg_values.len()
                     )));
-                }
-                let mut v = arg_values.into_iter().next().unwrap();
+                };
+                let mut v = v.clone();
 
                 // int -> float coercion applies here too, same as everywhere else
                 v = coerce_value_to_type(v, &inner_ty);
@@ -1252,11 +1354,10 @@ impl Interpreter {
 
                 let idx_usize = final_i as usize;
 
-                let final_val = match op {
-                    AssignOp::Assign => new_val,
-                    _ => {
-                        let bin_op = op.to_binary_op().unwrap(); // yes, this unwrap is also safe...
-                        let current = items[idx_usize].clone(); // also safe to access the index directly
+                let final_val = match op.to_binary_op() {
+                    None => new_val,
+                    Some(bin_op) => {
+                        let current = items[idx_usize].clone();
                         self.eval_arithmetic(&bin_op, current, new_val)
                             .map_err(|e| expr.error(e))?
                     }
@@ -1297,7 +1398,7 @@ impl Interpreter {
                 let mut replacement = ch.chars();
 
                 match (replacement.next(), replacement.next()) {
-                    (Some(c), ..) => {
+                    (Some(c), None) => {
                         // indices count unicode scalar values, not bytes (identical to imi's in-built `len()`),
                         // and this is why I'm using a Vec<char> instead of byte-slicing
                         let mut chars: Vec<char> = s.chars().collect();
@@ -1331,14 +1432,10 @@ impl Interpreter {
         rhs: Value,
         stmt: &StmtNode,
     ) -> Result<Value, LangError> {
-        // we handle plain a plain assignment right away
-        if let AssignOp::Assign = op {
+        // plain `=` has no binary operation to apply
+        let Some(bin_op) = op.to_binary_op() else {
             return Ok(rhs);
-        }
-
-        // it is safe to unwrap here since the early return above
-        // makes sure we don't hit the `None` variant
-        let bin_op = op.to_binary_op().unwrap();
+        };
 
         // we fetch the current value
         let current = env
@@ -1358,9 +1455,8 @@ impl Interpreter {
     /// have a template, but it can't count the {}s against the arguments
     fn do_format(&self, args: &[Value], call_site: &ExprNode) -> Result<String, LangError> {
         let Some(Value::Str(template)) = args.first() else {
-            return Err(
-                call_site.error("println/print/format expects a string as its first argument.")
-            );
+            // safe (but fragile) since the parser ensures the first argument is a string
+            unreachable!("bro, I swear you told me this was safe. damned be the parser");
         };
 
         let mut result = String::new();
@@ -1399,8 +1495,8 @@ impl Interpreter {
     }
 }
 
-/// shared by both branches of eval_index (the plain-variable fast path and the
-/// general fallback): arrays return a clone of the element.
+/// shared by both branches of eval_index (the plain-variable fast path and the general fallback): 
+/// arrays return a clone of the element.
 /// strings return a single character `str`, since imi has no separate char type. (and I'm not planning to introduce one either)
 /// this is the same representation MutPlace::StrChar writes into on the assignment side,
 /// so `s[0]` and `s[0] = "x"` agree on what a "character" is
@@ -1439,7 +1535,7 @@ fn index_into(
                     chars.len()
                 )));
             }
-            Ok(Value::Str(chars[i as usize].to_string()))
+            Ok(Value::Str(Rc::new(chars[i as usize].to_string())))
         }
         other => Err(target.error(format!(
             "Cannot index {} with {}.",
@@ -1500,7 +1596,7 @@ fn display_value(v: &Value) -> Result<String, String> {
         Value::Bool(b) => Ok(b.to_string()),
         Value::Array(items) => {
             let mut inner: Vec<String> = Vec::with_capacity(items.len());
-            for it in items {
+            for it in items.iter() {
                 inner.push(display_value(it)?);
             }
             Ok(format!("[{}]", inner.join(", ")))
@@ -1568,9 +1664,7 @@ fn infer_type(v: &Value) -> Result<Type, String> {
             "Cannot assign a void value to a variable. This call doesn't produce a usable value."
                 .to_string(),
         ),
-        Value::Uninitialized => {
-            unreachable!("Infer_type should never be called with no initializer.")
-        }
+        Value::Uninitialized => Err("Cannot infer the type of an uninitialized value.".to_string()),
     }
 }
 
@@ -1584,28 +1678,81 @@ fn contains_float(values: &[Value]) -> bool {
     })
 }
 
+/// I believe I explained this above in some match arm somewhere,
+/// but I will do it again in other words to be precise
+///
+/// when promoting ints to floats, we need exclusive access to the array
+/// if no one else is owning the data, we simply modify it, fine.
+/// if there are more owners, we clone the data so we can have exclusive access to it,
+/// leaving the original value unchanged. this is essentially what `Rc::make_mut(this)` does
+///
+/// this is relevant because coercing (which mutates) the items in an array owned by anyone other
+/// than the expression breaks the semantics of the language. therefore, it is important that if we're going
+/// to modify the array in-place, it can't have more owners than the expression itself
 fn promote_ints_to_floats(values: &mut [Value]) {
     for v in values.iter_mut() {
         match v {
             Value::Int(n) => *v = Value::Float(*n as f64),
-            Value::Array(inner) => promote_ints_to_floats(inner),
+            Value::Array(inner) => {
+                let inner: &mut Vec<Value> = Rc::make_mut(inner);
+                promote_ints_to_floats(inner);
+            }
             _ => {}
         }
     }
 }
 
 /// imi's ONLY implicit conversion: int -> float, applied recursively through
-/// arrays. everything else is exact. nothing ever converts float -> int
-pub fn coerce_value_to_type(v: Value, t: &Type) -> Value {
+/// arrays. everything else is exact. nothing ever converts float -> int.
+///
+/// importantly, this function does NOT clone an Rc-backed array just because it was
+/// asked to "coerce" it. if the value already matches the target type, the Rc is kept
+/// as-is. copy-on-write only kicks in along branches where an int actually has to become
+/// a float, which is the whole point of using Rc in the first place.
+pub fn coerce_value_to_type(mut v: Value, t: &Type) -> Value {
+    coerce_value_to_type_in_place(&mut v, t);
+    v
+}
+
+/// returns true only when applying the target type would actually change a value.
+/// this lets the in-place coercion below avoid Rc::make_mut on already-correct arrays.
+fn value_needs_coercion(v: &Value, t: &Type) -> bool {
     match (v, t) {
-        (Value::Int(n), Type::Float) => Value::Float(n as f64),
-        (Value::Array(items), Type::Array(inner_ty)) => {
-            let items = items
-                .into_iter()
-                .map(|item| coerce_value_to_type(item, inner_ty))
-                .collect();
-            Value::Array(items)
+        (Value::Int(_), Type::Float) => true,
+        (Value::Array(items), Type::Array(inner_ty)) => items
+            .iter()
+            .any(|item| value_needs_coercion(item, inner_ty)),
+        _ => false,
+    }
+}
+
+/// performs the actual conversion while respecting copy-on-write.
+/// if an array is shared, Rc::make_mut clones only when a descendant really needs
+/// coercion. nested arrays repeat the same rule so only the changed spine is copied.
+fn coerce_value_to_type_in_place(v: &mut Value, t: &Type) {
+    match t {
+        Type::Float => {
+            if let Value::Int(n) = v {
+                let n = *n;
+                *v = Value::Float(n as f64);
+            }
         }
-        (v, _) => v,
+        Type::Array(inner_ty) => {
+            let Value::Array(items) = v else {
+                return;
+            };
+
+            if !items
+                .iter()
+                .any(|item| value_needs_coercion(item, inner_ty))
+            {
+                return;
+            }
+
+            for item in Rc::make_mut(items).iter_mut() {
+                coerce_value_to_type_in_place(item, inner_ty);
+            }
+        }
+        Type::Int | Type::Str | Type::Bool => {}
     }
 }

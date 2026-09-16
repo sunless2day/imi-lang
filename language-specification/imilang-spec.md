@@ -24,14 +24,33 @@ a = 40;              // ERROR — a is immutable
 
 ### Assignment is by value
 
-Assigning one variable to another always copies the value — including `str` and arrays. `let a = b;` gives `a` its own independent copy; `b` stays valid and unaffected by anything done to `a` afterward, and vice versa.
-
-Passing a variable as a function argument works the same way: the callee receives its own copy and never a reference to the caller's original value.
+At the language level, assignment uses **value semantics**. `let a = b;` gives `a` an independent value: `b` stays valid, and mutating `a` later cannot change `b`, or vice versa. Function arguments follow the same rule.
 
 ```rust
 let b: str = "hello";
-let a = b;   // a is an independent copy; both remain valid
+let a = b;   // logically independent; both remain valid
 ```
+
+#### Implementation note: reference counting and copy-on-write
+
+The interpreter does not need to eagerly duplicate heap data every time a `str` or array value is copied. Internally, heap-backed values are reference-counted, so multiple imi values may temporarily share the same allocation. Copying such a value normally only copies the reference and increments its reference count.
+
+This is an implementation optimization only; it does **not** change imi's surface semantics. When shared data is about to be mutated, the interpreter uses copy-on-write: if that allocation has more than one owner, it first makes a private copy for the value being changed, then performs the mutation. If there is only one owner, it can mutate the existing allocation directly. Nested arrays apply the same rule only along the path that is actually being changed.
+
+For example:
+
+```rust
+let a: array[int] = [1, 2, 3];
+var b = a;
+b.push(4);
+
+println("{}", len(a)); // 3
+println("{}", len(b)); // 4
+```
+
+`a` and `b` may share storage immediately after `var b = a;`, but the first mutation of `b` separates the data as needed, so the observable result is exactly the same as if a full independent copy had been made at assignment time.
+
+User-defined function definitions are also stored behind reference-counted pointers internally so calling a function does not require cloning its parameter list, return type, and AST body on every call. This is not observable from imi code; functions are still not values or references in the language.
 
 ### Mutability belongs to the binding, not the data
 
@@ -72,7 +91,11 @@ The only implicit conversion in the language is `int` → `float`. It is applied
 
 * when a value is bound to a `float`-typed variable — at declaration (`var x: float = 1;`) or later assignment (`x = 2;`),
 * when an `int` is pushed onto or written into an `array[float]`, at any nesting depth,
-* when an array literal mixes `int` and `float` values (see [Numeric Promotion](#numeric-promotion)).
+* when an array literal mixes `int` and `float` values (see [Numeric Promotion](#numeric-promotion)),
+* when an `int` is passed to a function parameter declared as `float`,
+* when an `int` is returned from a function declared to return `float`.
+
+The same coercion is recursive for arrays at typed boundaries. For example, an `array[int]` passed to a parameter of type `array[float]`, or returned from a function declared to return `array[float]`, is converted element-by-element to `array[float]`. The same rule applies through nested arrays.
 
 No conversion ever happens in the other direction — a `float` is never implicitly narrowed to an `int`.
 
@@ -522,6 +545,8 @@ There is no unary `+` operator.
 * `+` concatenates two `str` values.
 * Adding a `str` to a number is an error.
 * `int` and `float` values may be compared with each other.
+* `str` values support equality and inequality comparisons with other `str` values.
+* Ordering one `str` against another using `<`, `>`, `<=`, or `>=` is an error. Strings do not have lexicographic ordering.
 * Comparing a `str` against a number with `==` or `!=` is allowed and always produces `false` or `true`, respectively.
 * Ordering a `str` against a number using `<`, `>`, `<=`, or `>=` is an error.
 * `bool` values support equality and inequality comparisons.
@@ -562,19 +587,29 @@ fn log_message(msg: str) {
 * A function without a declared return type produces `void` when called — a value meant only to be discarded. Assigning it to a variable or formatting it is a runtime error.
 * A function with a declared return type must return a value of that type.
 * Reaching the end of a function with a declared return type without returning is a runtime error.
-* Returning a value whose type does not match the declared return type is a runtime error.
+* Returning a value whose type does not match the declared return type after the allowed `int` → `float` promotion is a runtime error.
 * A bare `return;` is allowed only inside a function without a declared return type.
 * A bare `return;` exits the function immediately.
 * Calling a function with the wrong number of arguments is a runtime error.
-* Calling a function with an argument whose type does not match the corresponding parameter is a runtime error.
-* Argument types must match parameter types exactly. Unlike assignment and array writes, no `int` → `float` promotion is applied at function boundaries.
+* Calling a function with an argument whose type does not match the corresponding parameter after the allowed `int` → `float` promotion is a runtime error.
+* Function parameters and return values use the same `int` → `float` promotion rule as assignment and array writes. This also applies recursively through arrays. No other implicit conversion is performed at function boundaries.
 * Two parameters of the same function may not share a name; duplicates are a syntax error.
-* Arguments are passed by value. The function receives its own copy of each argument.
+* Arguments are passed by value from the language's point of view. Heap-backed argument values may share reference-counted storage internally until one copy is mutated; this sharing is not observable from imi code.
 * A function call is an expression and may be used anywhere an expression is allowed.
 * Recursion is supported. There is a fixed maximum call depth (currently 512 nested calls); exceeding it is a runtime error, not a crash.
 
 ```rust
 let result = add(1, 2) + 3;
+
+fn add_two(a: float) -> float {
+    return a + 2;
+}
+
+let promoted = add_two(10); // 10 is promoted to 10.0; result is float 12.0
+
+fn ten() -> float {
+    return 10;              // returned int is promoted to float 10.0
+}
 ```
 
 Functions are not values.
@@ -781,14 +816,18 @@ parse(value)
 Attempts to convert a `str` into the most specific type it looks like, in this order:
 
 1. If the text parses as an `int` (an optional leading `-` or `+` is allowed), returns an `int`.
-2. Otherwise, if the text contains a `.`, and parses as a decimal number, returns a `float`.
+2. Otherwise, if the text contains a `.`, and Rust's `f64` parser accepts it, returns a `float`. This includes ordinary decimal notation and scientific notation such as `"1.5e4"`.
 3. Otherwise, if the text is exactly `"true"` or `"false"`, returns the corresponding `bool`.
 4. Otherwise, returns the original `str` unchanged.
+
+Scientific notation here is a property of the `parse` built-in, not of imi's numeric literal syntax. Source literals such as `1.5e4` are still not accepted by the lexer. Also, the current `parse` implementation only attempts float parsing when the string contains a decimal point, so `parse("1.5e4")` returns the `float` value `15000.0`, while `parse("1e4")` falls back to the original `str`.
 
 `parse` never raises an error on unparseable input; it falls back to returning the input string as-is. Combined with a declared type, an unexpected shape surfaces as an ordinary type-mismatch runtime error instead:
 
 ```rust
 let age: int = parse(input("Enter your age: "));   // runtime error if the input isn't a whole number
+let sci = parse("1.5e4");                         // 15000.0 (float)
+let raw_sci = parse("1e4");                       // "1e4" (str) — no decimal point, so float parsing is not attempted
 let raw = parse("hello");                          // "hello" (str), no error
 ```
 
@@ -923,6 +962,7 @@ Detected during execution, once the relevant expression or statement actually ru
 * an `int` exponent too large to represent,
 * integer overflow in `+`, `-`, `*`, or `^`,
 * adding a `str` to a non-`str`,
+* ordering one `str` against another with `<`, `>`, `<=`, or `>=`,
 * ordering a `str` against a number with `<`, `>`, `<=`, or `>=` (equality is allowed and always `false`, see [Numeric behavior](#numeric-behavior)),
 * ordering `bool` values with anything other than `==`/`!=`,
 * applying arithmetic or comparison to two otherwise incompatible types.
@@ -957,4 +997,4 @@ Detected during execution, once the relevant expression or statement actually ru
 * an `fwrite` mode that isn't `"o"` or `"a"`.
 
 **Environment**
-* an underlying I/O failure unrelated to program logic — e.g. `input()` failing to read a line, output failing to flush, or `fread`/`fwrite` failing to read or write a file. These can occur even in a program with no bugs, since they stem from the surrounding environment rather than anything the program did.
+* an underlying I/O failure unrelated to program logic — e.g. `input()` failing to read or flush its prompt, or `fread`/`fwrite` failing to read or write a file. These can occur even in a program with no bugs, since they stem from the surrounding environment rather than anything the program did. `print`/`println` deliberately ignore stdout write/flush failures rather than turning them into runtime errors.
