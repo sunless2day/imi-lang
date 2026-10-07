@@ -5,3 +5,10 @@ version = 4
 [[package]]
 name = "imi"
 version = "0.1.0"
+dependencies = [
+ "imi-core",
+]
+
+[[package]]
+name = "imi-core"
+version = "0.1.0"
