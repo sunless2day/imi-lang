@@ -20,7 +20,7 @@ pub struct Binding {
     pub mutable: bool,
     /// sometimes an immutable variable can be declared and not initialized right away,
     /// the interpreter must know if it was initialized or not so something like:
-    /// ```
+    /// ```text
     ///  let x: int;
     ///
     ///  x = 15;
