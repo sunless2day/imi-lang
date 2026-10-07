@@ -10,8 +10,8 @@ imi is a very simple and minimal language following a procedural and imperative 
 here is a little about imi as a language:
 
 * statically typed but leans heavily on type inference, think of it like the `auto` keyword in C++ or Rust's native type inference
-* arrays are homogeneous and can be nested, so `array[array[int]]` is completely fine
-* both strings and arrays can be indexed with `[]`
+* it was a pain to implement
+* is **NOT** blazingly fast🚀⚡
 * functions and variables live in separate namespaces, so a function and a variable can share a name without ever colliding
 * if you're used to Rust the syntax will feel familiar
 
@@ -36,7 +36,7 @@ cargo install --path .
 either way this gives you a binary called `imi`. if running `imi` afterward says command not found, cargo's bin folder probably isn't on your PATH yet, add this to your shell config (`.bashrc`, `.zshrc`, whatever you use):
 
 ```sh
-export PATH="$HOME/.cargo/bin:$PATH"
+export PATH="$PATH:$HOME/.cargo/bin"
 ```
 
 ***
@@ -52,51 +52,6 @@ imi program.imi
 ```
 
 `imi` only accepts exactly one argument and it has to end in `.imi`. no arguments, more than one, or the wrong extension, all of those are an error.
-
-## new additions to imi-lang!
-
-a friend of mine working on this project as well suggested a way to optimize the imi interpreter by using references under the hood. I thought about it for a bit and ended up with this:
-
-heap-backed data can now share the same underlying allocation through reference counting until one of the values needs to mutate it. the specific details are in the spec (like always), but in short:
-
-**imi's copy semantics are still intact. the underlying implementation is just free to optimize how those semantics are achieved.**
-
-```rust
-let s1 = "hello";
-// "hello" is allocated on the heap and s1 holds a reference-counted pointer to it.
-// so far, nothing strange.
-
-let s2 = s1;
-// instead of eagerly cloning "hello" into a second allocation,
-// s2 can share the same underlying string with s1.
-```
-
-so now `s1` and `s2` may point to the exact same data on the heap. from imi code, though, they still behave like completely independent values. you can pass them into functions, concatenate them, index them, format them, and so on exactly like before. ideally, you won't notice anything changed except that the interpreter has less unnecessary copying to do.
-
-now you may ask: okay, but what if `s2` is mutable and we try to mutate data that's currently shared by both variables?
-
-```rust
-let s1 = "hello";
-
-var s2 = s1;
-
-s2[4] = "👹";
-```
-
-at first glance you'd expect `s2` to mutate the same string that `s1` is looking at, which would also change the value behind an immutable binding. that would obviously break imi's existing semantics.
-
-instead, right before the mutation happens, `s2` gets its own private copy of the shared data. the mutation is then performed on that copy, while `s1` keeps pointing at the original `"hello"`.
-
-so after that:
-
-```rust
-println("{}", s1); // hello
-println("{}", s2); // hell👹
-```
-
-this is **copy-on-write**. earlier, heap-backed values were eagerly cloned whenever they were copied, even if neither copy was ever going to be mutated. now the interpreter can share the allocation for as long as that is safe, and only clone when a mutation actually makes it necessary.
-
-arrays use the same idea, including nested arrays. from the language's point of view nothing changed: assignment and function arguments still have value semantics, and mutating one copied value can never mutate another one by accident.
 
 ## Types
 
@@ -485,6 +440,51 @@ banana
 `.push(T)` adds an element T to the end of the array. `.pop()` removes and returns the last element, while `.remove(n)` removes and returns an element at index n.
 
 these methods can only be used on mutable arrays, using them on `let` arrays causes yet another runtime error.
+
+## new additions to imi-lang!
+
+a friend of mine working on this project as well suggested a way to optimize the imi interpreter by using references under the hood. I thought about it for a bit and ended up with this:
+
+heap-backed data can now share the same underlying allocation through reference counting until one of the values needs to mutate it. the specific details are in the spec (like always), but in short:
+
+**imi's copy semantics are still intact. the underlying implementation is just free to optimize how those semantics are achieved.**
+
+```rust
+let s1 = "hello";
+// "hello" is allocated on the heap and s1 holds a reference-counted pointer to it.
+// so far, nothing strange.
+
+let s2 = s1;
+// instead of eagerly cloning "hello" into a second allocation,
+// s2 can share the same underlying string with s1.
+```
+
+so now `s1` and `s2` may point to the exact same data on the heap. from imi code, though, they still behave like completely independent values. you can pass them into functions, concatenate them, index them, format them, and so on exactly like before. ideally, you won't notice anything changed except that the interpreter has less unnecessary copying to do.
+
+now you may ask: okay, but what if `s2` is mutable and we try to mutate data that's currently shared by both variables?
+
+```rust
+let s1 = "hello";
+
+var s2 = s1;
+
+s2[4] = "👹";
+```
+
+at first glance you'd expect `s2` to mutate the same string that `s1` is looking at, which would also change the value behind an immutable binding. that would obviously break imi's existing semantics.
+
+instead, right before the mutation happens, `s2` gets its own private copy of the shared data. the mutation is then performed on that copy, while `s1` keeps pointing at the original `"hello"`.
+
+so after that:
+
+```rust
+println("{}", s1); // hello
+println("{}", s2); // hell👹
+```
+
+this is **copy-on-write**. earlier, heap-backed values were eagerly cloned whenever they were copied, even if neither copy was ever going to be mutated. now the interpreter can share the allocation for as long as that is safe, and only clone when a mutation actually makes it necessary.
+
+arrays use the same idea, including nested arrays. from the language's point of view nothing changed: assignment and function arguments still have value semantics, and mutating one copied value can never mutate another one by accident.
 
 ## What imi can't do (I suppose)
 
