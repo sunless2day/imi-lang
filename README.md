@@ -11,13 +11,13 @@ here is a little about imi as a language:
 
 * statically typed but leans heavily on type inference, think of it like the `auto` keyword in C++ or Rust's native type inference
 * it was a pain to implement
-* is **NOT** blazingly fast🚀⚡
+* it's **NOT** blazingly fast🚫🚀⚡
 * functions and variables live in separate namespaces, so a function and a variable can share a name without ever colliding
 * if you're used to Rust the syntax will feel familiar
 
 ## Installation
 
-you'll need cargo installed for this, which comes with the Rust toolchain.
+you'll need cargo installed for this, which comes with the [Rust toolchain](https://rust-lang.org/tools/install/).
 
 easiest way, straight from the repo:
 
@@ -38,6 +38,8 @@ either way this gives you a binary called `imi`. if running `imi` afterward says
 ```sh
 export PATH="$PATH:$HOME/.cargo/bin"
 ```
+
+if you're on on a Windows (or non-POSIX compliant) system, figure it out yourself.
 
 ***
 
