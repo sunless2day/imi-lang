@@ -116,6 +116,13 @@ impl Lexer {
                         }
                     }
                 }
+                // imi now ignores shebang lines if they're at the top of a file
+                // (I can't believe I forgot about this feature)
+                '#' if self.pos == 0 && self.peek_at(1) == '!' => {
+                    while self.peek() != '\n' && !self.is_at_end() {
+                        self.advance();
+                    }
+                }
                 _ => break,
             }
         }

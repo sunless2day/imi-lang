@@ -326,6 +326,32 @@ Block comments may be nested.
 
 Whitespace and comments have no effect on program execution.
 
+### Shebang
+
+A source file may begin with a shebang line, such as `#!/usr/bin/env imi`.
+
+* `#!` must be the first two characters of the file, with no preceding whitespace, blank lines, comments, or byte order mark.
+* The interpreter ignores everything from the initial `#!` up to the first newline (`\n`), or the end of the file if there is no newline. Both LF and CRLF line endings are supported.
+* The shebang still counts as line 1 when reporting errors; code on the following line starts at line 2.
+* `#!` elsewhere does not start a comment. Outside strings and comments, it is a lexical error.
+* The interpreter does not parse or execute the contents of the shebang.
+
+For example, `hello.imi` may contain:
+
+```text
+#!/usr/bin/env imi
+println("Hello!");
+```
+
+On Unix-like systems, with `imi` available in `PATH`, the file can be run directly after making it executable:
+
+```sh
+chmod +x hello.imi
+./hello.imi
+```
+
+The operating system uses the shebang to select the interpreter. Running `imi hello.imi` directly also works. The CLI still requires the `.imi` file extension.
+
 ## 5. Program Structure
 
 There is no `main` function. A program is simply a sequence of top-level statements, which are executed from top to bottom.
@@ -914,7 +940,7 @@ All errors report the line and column at which the relevant construct occurs, wh
 Detected while turning source text into tokens, before parsing begins.
 
 * A character that doesn't start any valid token.
-* A `!` not immediately followed by `=` — `!=` is the only valid use of `!` (see [Logical](#logical)).
+* Outside strings, comments, and the initial [shebang](#shebang), a `!` not immediately followed by `=` — `!=` is the only valid operator containing `!` (see [Logical](#logical)).
 * A numeric literal with more than one decimal point.
 * An integer literal outside the range of a signed 64-bit integer.
 * An invalid escape sequence inside a string literal (see [String literals](#string-literals) for the supported set).
