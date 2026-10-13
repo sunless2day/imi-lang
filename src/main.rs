@@ -1,5 +1,5 @@
 //! I doubt there is much to say about this module
-//! it just brings in all the modules and orchestrates the flow of the interpreter
+//! it just uses the exposed `run()` function from the library crate
 
 use std::{env::args, fs, process::ExitCode};
 
