@@ -57,20 +57,20 @@ imi program.imi
 
 ### Running a program with a shebang
 
-On Unix-like systems, you can also run a program directly using a shebang. Add this to the very first line of your `.imi` file, with no spaces or blank lines before it:
+on Unix-like systems, you can also run a program directly using a shebang. add this to the very first line of your `.imi` file, with no spaces or blank lines before it:
 
 ```text
 #!/usr/bin/env imi
 ```
 
-This assumes `imi` is available in your `PATH` (will be if you followed the instructions above). Make the file executable, then run it:
+this assumes `imi` is available in your `PATH` (will be if you followed the instructions above). make the file executable, then run it:
 
 ```sh
 chmod u+x program.imi
 ./program.imi
 ```
 
-The operating system uses the shebang to launch `imi`, and the interpreter ignores that line when reading your code, provided that the shebang has no leading whitespace.
+the operating system uses the shebang to launch `imi`, and the interpreter ignores that line when reading your code, provided that the shebang has no leading whitespace.
 
 ## Types
 
