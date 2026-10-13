@@ -33,7 +33,7 @@ cd imi-lang
 cargo install --path .
 ```
 
-either way this gives you a binary called `imi`. if running `imi` afterward says command not found, cargo's bin folder probably isn't on your PATH yet, add this to your shell config (`.bashrc`, `.zshrc`, whatever you use):
+either way this gives you a binary called `imi`. if running `imi` afterward says command not found, cargo's bin folder probably isn't on your `PATH` yet, add this to your shell config (`.bashrc`, `.zshrc`, whatever you use):
 
 ```sh
 export PATH="$PATH:$HOME/.cargo/bin"
@@ -54,6 +54,23 @@ imi program.imi
 ```
 
 `imi` only accepts exactly one argument and it has to end in `.imi`. no arguments, more than one, or the wrong extension, all of those are an error.
+
+### Running a program with a shebang
+
+On Unix-like systems, you can also run a program directly using a shebang. Add this to the very first line of your `.imi` file, with no spaces or blank lines before it:
+
+```text
+#!/usr/bin/env imi
+```
+
+This assumes `imi` is available in your `PATH` (will be if you followed the instructions above). Make the file executable, then run it:
+
+```sh
+chmod u+x program.imi
+./program.imi
+```
+
+The operating system uses the shebang to launch `imi`, and the interpreter ignores that line when reading your code, provided that the shebang has no leading whitespace.
 
 ## Types
 
