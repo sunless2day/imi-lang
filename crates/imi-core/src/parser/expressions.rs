@@ -155,11 +155,22 @@ impl Parser {
     }
 
     /// I'm starting to question if I should document these little methods...
+    /// now I am! ... a month later
+    /// stacked minus signs (`--x`, `- -x`) are rejected on purpose.
+    /// math convention writes that as `-(-x)`, so the parentheses are required.
+    /// (`2 - -3` is still fine, that's a binary minus followed by a single unary one)
+    /// `-2^2` is still `-(2^2)`, because the operand is parsed by parse_power
     fn parse_unary(&mut self) -> Result<ExprNode, LangError> {
         if self.check(&Token::Minus) {
             let line = self.current_line();
             let col = self.current_col();
             self.advance();
+            if self.check(&Token::Minus) {
+                return Err(self
+                    .current_span()
+                    .error("Unary minus cannot be stacked.")
+                    .with_suggestion("Use parentheses instead, like -(-x)."));
+            }
             let operand = self.parse_power()?;
             return Ok(Spanned {
                 node: Expr::Unary(UnaryOp::Neg, Box::new(operand)),
@@ -264,16 +275,23 @@ impl Parser {
                     // a literal is the only guarantee we get)
                     if matches!(name.as_str(), "print" | "println" | "format") {
                         match args.first() {
-                            Some(a) if matches!(a.node, Expr::Literal(Literal::Str(_))) => {}
+                            // the template is a literal, so its braces can be validated right here,
+                            // before the program runs (rust's println! does the same at compile time)
                             Some(a) => {
-                                return Err(a.error(format!("'{}' requires a string literal as its first argument, not a variable.", name)));
+                                if let Expr::Literal(Literal::Str(template)) = &a.node {
+                                    if let Err((msg, help)) = check_format_template(template) {
+                                        return Err(a.error(msg).with_suggestion(help));
+                                    }
+                                } else {
+                                    return Err(a.error(format!("'{}' requires a string literal as its first argument, not a variable.", name)));
+                                }
                             }
                             None => {
                                 return Err(LangError::new(
-                                    self.current_line(),
-                                    self.current_col(),
+                                    line,
+                                    col,
                                     format!(
-                                        "'{}' expects a string literal as its first argument",
+                                        "'{}' expects a string literal as its first argument.",
                                         name
                                     ),
                                 ));
@@ -301,7 +319,7 @@ impl Parser {
             other => {
                 return Err(self
                     .current_span()
-                    .error(format!("Expected an expression, found {:?}.", other)));
+                    .error(format!("Expected an expression, found {}.", other)));
             }
         };
 
@@ -325,5 +343,82 @@ impl Parser {
             }
         }
         Ok(items)
+    }
+}
+
+/// validates the braces of a print/println/format template, following rust's rules.
+/// `{}` is a placeholder, `{{` and `}}` are literal braces, and ANY other brace is an error.
+/// so `println("{x}");` is rejected instead of actually printing "{x}"
+/// (imi has no inline variables in templates, values always go in as arguments).
+///
+/// it only checks the shape of the template. the placeholder count is still
+/// matched against the arguments at runtime, in the evaluator's do_format
+fn check_format_template(template: &str) -> Result<(), (String, String)> {
+    let mut chars = template.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match c {
+            '{' => match chars.peek() {
+                // `{{` (escape) and `{}` (placeholder) are the only valid ways to open a brace
+                Some('{') | Some('}') => {
+                    chars.next();
+                }
+                _ => {
+                    // collect whatever is between the braces, just to show it in the error
+                    let mut inner = String::new();
+                    loop {
+                        match chars.next() {
+                            Some('}') => {
+                                return Err((
+                                    format!(
+                                        "Invalid format string: '{{{}}}' is not a placeholder.",
+                                        inner
+                                    ),
+                                    "Only '{}' is a placeholder. Pass values as arguments, like println(\"{}\", x).".to_string(),
+                                ));
+                            }
+                            Some(ch) => inner.push(ch),
+                            None => {
+                                return Err((
+                                    "Invalid format string: unmatched '{'.".to_string(),
+                                    "Use '{{' to print a literal '{'.".to_string(),
+                                ));
+                            }
+                        }
+                    }
+                }
+            },
+            '}' => {
+                if chars.peek() == Some(&'}') {
+                    chars.next();
+                } else {
+                    return Err((
+                        "Invalid format string: unmatched '}'.".to_string(),
+                        "Use '}}' to print a literal '}'.".to_string(),
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::check_format_template;
+
+    #[test]
+    fn valid_templates() {
+        for t in ["", "{}", "{{}}", "a {} b {}", "{{x}}"] {
+            assert!(check_format_template(t).is_ok(), "{t:?} should be valid");
+        }
+    }
+
+    #[test]
+    fn invalid_templates() {
+        for t in ["{x}", "{", "}", "{ }", "a } b"] {
+            assert!(check_format_template(t).is_err(), "{t:?} should be invalid");
+        }
     }
 }

@@ -153,6 +153,14 @@ var x: array[int] = [];
 
 An empty array is compatible with any `array[T]` type, since it has no elements to contradict `T`.
 
+This also applies to empty arrays nested inside an array literal. They are skipped when the element type is determined, and the remaining elements decide it:
+
+```rust
+var grid: array[array[int]] = [[], []]; // fine, the annotation gives the type
+var rows = [[1, 2], []];                // array[array[int]]
+var empty = [[], []];                   // ERROR — no element has an inferable type
+```
+
 ### Numeric Promotion
 
 If an array literal contains a mix of `int` and `float` values, the `int`s are automatically promoted to `float`s, making the array homogeneous of type `array[float]`. This applies recursively to nested arrays.
@@ -559,6 +567,14 @@ To negate the number before exponentiation:
 
 evaluates to `25`.
 
+Unary `-` cannot be applied directly to another unary `-`. Stacked signs such as `--5` or `- -5` are a syntax error; the inner negation must be parenthesized instead:
+
+```rust
+--5      // ERROR — stacked unary minus
+-(-5)    // 5
+2 - -3   // 5, a binary minus followed by a single unary minus
+```
+
 There is no unary `+` operator.
 
 ### Numeric behavior
@@ -622,7 +638,7 @@ fn log_message(msg: str) {
 * Two parameters of the same function may not share a name; duplicates are a syntax error.
 * Arguments are passed by value from the language's point of view. Heap-backed argument values may share reference-counted storage internally until one copy is mutated; this sharing is not observable from imi code.
 * A function call is an expression and may be used anywhere an expression is allowed.
-* Recursion is supported. There is a fixed maximum call depth (currently 512 nested calls); exceeding it is a runtime error, not a crash.
+* Recursion is supported. There is a fixed maximum call depth (currently 12,800 nested calls); exceeding it is a runtime error, not a crash.
 
 ```rust
 let result = add(1, 2) + 3;
@@ -695,12 +711,13 @@ println(score);            // ERROR — first argument must be a str literal
 
 The number of `{}` placeholders must exactly match the number of additional arguments.
 
-To print a literal `{` or `}`, write it doubled as `{{` or `}}`. A `{` or `}` that is not part of a `{}` placeholder or a `{{`/`}}` escape is printed unchanged.
+To print a literal `{` or `}`, write it doubled as `{{` or `}}`. Any other `{` or `}` is a syntax error caught while parsing, like the string-literal rule above. This includes braces with something inside them: values are always passed as arguments, never named inside the template.
 
 ```rust
 println("{{{}}}", 5);      // prints: {5}
 println("literal: {{}}");  // prints: literal: {}
-println("bad: {");         // prints: bad: {
+println("bad: {");         // ERROR — unmatched '{'
+println("{x}");            // ERROR — '{x}' is not a placeholder
 ```
 
 ### `println`
@@ -776,7 +793,7 @@ Pauses execution for the specified number of seconds.
 
 The argument may be an `int` or `float`.
 
-The duration must be zero or positive. A negative value is a runtime error.
+The duration must be zero or positive. A negative value, or one too large to represent as a duration, is a runtime error.
 
 ### `type`
 
@@ -903,6 +920,8 @@ Reads the entire contents of the file at `path` and returns it as a `str`.
 
 `path` must be a `str`. If the file cannot be read, for any reason (it doesn't exist, permission is denied, its contents aren't valid UTF-8, and so on), this is a runtime error that terminates the program, reporting the underlying reason.
 
+A relative `path` is resolved against the current working directory of the process running the interpreter, **not** the directory containing the source file. Running `imi scripts/foo.imi` from `/home/user` makes `fread("notes.txt")` look for `/home/user/notes.txt`, not `/home/user/scripts/notes.txt`. Absolute paths are used as-is.
+
 ```rust
 let contents = fread("notes.txt");
 println("{}", contents);
@@ -920,6 +939,8 @@ Writes `contents` to the file at `path`. `mode` selects what happens to any exis
 * `"a"` appends `contents` to the end of the file instead of replacing anything. Also creates the file if it doesn't exist.
 
 There is no default mode. `mode` is a required argument specifically so that destroying a file's previous contents is never something that happens by accident, only as an explicit, visible choice at the call site.
+
+`path` is resolved the same way as for `fread`: relative to the current working directory, not the source file's directory.
 
 `path`, `contents`, and `mode` must all be `str`. Any `mode` other than `"o"` or `"a"` is a runtime error. If the write itself fails, for any other reason (the containing directory doesn't exist, permission is denied, and so on), that is also a runtime error that terminates the program, reporting the underlying reason.
 
@@ -962,7 +983,9 @@ Beyond that generic case, the following are also syntax errors — including sev
 * A variable declaration with neither a type annotation nor an initializer (see [Variable Declarations](#1-variable-declarations)) — note that despite living among otherwise runtime-checked type rules, this specific check is a syntax error.
 * An assignment target that is not a variable or an index expression (e.g. `5 = 3;`).
 * Chained comparison operators (see [Comparisons](#comparisons)).
+* Stacked unary minus, such as `--x` (see [Unary negation](#unary-negation)).
 * The first argument to `print`, `println`, or `format` not being a string literal (see [`print`](#print)) — checked against the argument's syntactic shape, not its runtime type, so a `str`-typed variable in that position is still rejected.
+* A `{` or `}` in that string literal that is not part of a `{}` placeholder or a `{{`/`}}` escape (see [`print`](#print)).
 
 ### Runtime Errors
 
@@ -1018,7 +1041,7 @@ Detected during execution, once the relevant expression or statement actually ru
 * indexing a value that is neither an array nor a string.
 
 **Built-ins**
-* sleeping for a negative duration,
+* sleeping for a negative or unrepresentably large duration,
 * an `exit` code outside `0`–`255`.
 * an `fwrite` mode that isn't `"o"` or `"a"`.
 

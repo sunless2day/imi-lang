@@ -105,13 +105,14 @@ impl Interpreter {
                 [v] => {
                     let secs = as_f64(v).map_err(|e| call_site.error(e))?;
                     // from_secs_f64 panics on negative, NaN and absurdly huge values,
-                    // and I want every possible error (at the language-level) to be a LangError instead of Rust's runtime panics
-                    if !(0.0..=Duration::MAX.as_secs_f64()).contains(&secs) {
-                        return Err(
-                            call_site.error(format!("'sleep' can't sleep for {} seconds.", secs))
-                        );
-                    }
-                    thread::sleep(Duration::from_secs_f64(secs));
+                    // and I want every possible error (at the language-level) to be a LangError instead of Rust's runtime panics.
+                    // the try_ version reports those as an Err instead.
+                    // (a manual range check against Duration::MAX would cut it, but MAX rounds UP when turned into an f64, so the
+                    // biggest "allowed" value still panicked)
+                    let duration = Duration::try_from_secs_f64(secs).map_err(|_| {
+                        call_site.error(format!("'sleep' can't sleep for {} seconds.", secs))
+                    })?;
+                    thread::sleep(duration);
                     Ok(Value::Void)
                 }
                 _ => Err(call_site.error(format!(
@@ -216,7 +217,7 @@ impl Interpreter {
                     Err(call_site.error(format!("'parse' expects a 'str', got {}.", type_name(v))))
                 }
                 _ => Err(call_site.error(format!(
-                    "'parse' expects 1 argument, got {}",
+                    "'parse' expects 1 argument, got {}.",
                     arg_values.len()
                 ))),
             },

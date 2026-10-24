@@ -1,0 +1,6 @@
+                    // must run in the the root directory!!
+let content = fread("./tests/target_files/sentence.txt");
+
+let slice = strslice(content, len(content) - len("random sentence") - 1, len(content));
+
+print("{}", slice);

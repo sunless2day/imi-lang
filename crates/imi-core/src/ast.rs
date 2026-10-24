@@ -87,6 +87,8 @@ pub struct Param {
 pub type StmtNode = Spanned<Stmt>;
 
 /// note that some parts are wrapped around an Option<T> precisely because they are optional
+// clippy kept nagging that `ExprStmt` ended in the enum's name... silly clippy
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone)]
 pub enum Stmt {
     /// declares an immutable variable (assigning to it after it's initialized is an error)
@@ -123,6 +125,31 @@ impl AssignOp {
             AssignOp::ModEq => Some(BinaryOp::Mod),
             AssignOp::Assign => None,
         }
+    }
+}
+
+/// since we're getting new error messages now,
+/// I'm implementing the fmt method for our binary operator
+/// (so an error says `5 * 3`, not `5 Mul 3`)
+impl std::fmt::Display for BinaryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let s = match self {
+            BinaryOp::Add => "+",
+            BinaryOp::Sub => "-",
+            BinaryOp::Mul => "*",
+            BinaryOp::Div => "/",
+            BinaryOp::Pow => "^",
+            BinaryOp::Mod => "%",
+            BinaryOp::Eq => "==",
+            BinaryOp::NotEq => "!=",
+            BinaryOp::Lt => "<",
+            BinaryOp::Gt => ">",
+            BinaryOp::LtEq => "<=",
+            BinaryOp::GtEq => ">=",
+            BinaryOp::And => "and",
+            BinaryOp::Or => "or",
+        };
+        write!(f, "{}", s)
     }
 }
 

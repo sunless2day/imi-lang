@@ -30,20 +30,22 @@ impl LangError {
     }
 }
 
-/// if you see weird ansi escape codes, this is for nice coloring and font-style in the error message and the suggestion
+/// rework: no ansi escape codes in here anymore.
+/// the library has no idea whether its output ends up in a terminal, a file or a pipe,
+/// so the responsability for coloring (and the source line + caret) carries over to report.rs, which does know
 impl fmt::Display for LangError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "\x1b[1;31merror at line {}, column {}:\x1b[0m {}",
+            "error at line {}, column {}: {}",
             self.line, self.col, self.message
-        )?; // this makes it reb
+        )?;
         if let Some(s) = &self.suggestion {
-            write!(f, "\n\t\x1b[3;32mhelp:\x1b[0m {}", s)?; // and this makes it geen
+            write!(f, "\n\thelp: {}", s)?;
         }
         Ok(())
     }
-} // ball knowledge is required to understand the spelling mistakes
+}
 
 // so LangError composes with Box<dyn Error> and friends
 impl std::error::Error for LangError {}

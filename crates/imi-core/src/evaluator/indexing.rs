@@ -73,10 +73,10 @@ impl Interpreter {
     ///
     /// two kind of places exist:
     /// - an element of a `var` declared (and maybe nested) array -> MutPlace::ArrayElem,
-    /// along with the declared element type (needed for int->float coercion)
+    ///   along with the declared element type (needed for int->float coercion)
     ///
-    /// -a character of a `var` declared string -> MutPlace::StrChar,
-    /// strings join arrays here so `s[0] = "x"` works exactly array element assignment.
+    /// - a character of a `var` declared string -> MutPlace::StrChar,
+    ///   strings join arrays here so `s[0] = "x"` works exactly array element assignment.
     ///
     /// the indices in `indices` navigate array levels EXCLUSIVELY, yes, EXCLUSIVELY.
     /// which means that the final index (the one landing on a string, when there is one)
@@ -122,7 +122,7 @@ impl Interpreter {
                 Type::Array(inner) => *inner,
                 Type::Str => {
                     return Err(target.error(
-                        "Cannot index into a character. Only the last index may target a str",
+                        "Cannot index into a character. Only the last index may target a str.",
                     ));
                 }
                 _ => return Err(target.error("Cannot index into a non-array.")),
@@ -185,6 +185,27 @@ impl Interpreter {
 
         let arg_values = self.eval_arguments(args, env)?;
 
+        // these two checks run BEFORE get_indexable_binding_mut on purpose:
+        // that method checks mutability, and telling someone to "use var" is bad advice
+        // when the real problem is that the method doesn't exist or the target is a string
+        if !matches!(method, "push" | "pop" | "remove") {
+            return Err(target.error(format!("Array has no method '{}'.", method)));
+        }
+        if let Some(binding) = env.get_mut(&root_name) {
+            // follow the declared type down one level per index,
+            // like `words[0]` leading to a str type
+            let mut ty = &binding.ty;
+            for _ in &target_indices {
+                if let Type::Array(inner) = ty {
+                    ty = inner;
+                }
+            }
+            if *ty == Type::Str {
+                return Err(target
+                    .error("Strings have no methods. Method calls are only supported on arrays."));
+            }
+        }
+
         let (items, inner_ty) =
             match self.get_indexable_binding_mut(target, &root_name, &target_indices, env)? {
                 MutPlace::ArrayElem(items, inner_ty) => (items, inner_ty),
@@ -237,7 +258,7 @@ impl Interpreter {
                         arg_values.len()
                     )));
                 }
-                let idx = match arg_values.get(0) {
+                let idx = match arg_values.first() {
                     Some(Value::Int(i)) => *i,
                     _ => return Err(target.error("'remove' expects 1 int argument.")),
                 };
@@ -376,7 +397,16 @@ impl Interpreter {
         let current = env
             .get(name)
             .cloned()
-            .ok_or_else(|| stmt.error(format!("Undeclared variable '{}'", name)))?;
+            .ok_or_else(|| stmt.error(format!("Undeclared variable '{}'.", name)))?;
+
+        // `var x: int; x += 1;` would otherwise complain about "arithmetic on uninitialized",
+        // which is technically true but the same mistake as reading x, so it gets the same message
+        if matches!(current, Value::Uninitialized) {
+            return Err(stmt.error(format!(
+                "Variable '{}' used before being assigned a value.",
+                name
+            )));
+        }
 
         // and finally evaluate the expression
         self.eval_arithmetic(&bin_op, current, rhs)

@@ -1,6 +1,9 @@
 use super::{
     Interpreter,
-    types::{contains_float, infer_type, promote_ints_to_floats, type_name},
+    types::{
+        contains_float, infer_type, promote_ints_to_floats, type_name, value_matches_type,
+        value_type_name,
+    },
     value::{Value, as_f64},
 };
 use crate::{
@@ -56,17 +59,27 @@ impl Interpreter {
                     promote_ints_to_floats(&mut values);
                 }
 
-                if let Some(first) = values.first() {
-                    let first_type = infer_type(first).map_err(|e| elements[0].error(e))?;
-                    for (i, item) in values.iter().enumerate().skip(1) {
-                        let item_type = infer_type(item).map_err(|e| elements[i].error(e))?;
-                        if item_type != first_type {
-                            return Err(elements[i].error(format!(
-                                "Array elements must have the same type, found {} and {}.",
-                                first_type, item_type
-                            )));
-                        }
-                    }
+                // void is checked first because it has no type, so the check below would just skip over it
+                if let Some(i) = values.iter().position(|v| matches!(v, Value::Void)) {
+                    return Err(elements[i].error(
+                        "Array elements cannot be void. This call doesn't produce a usable value.",
+                    ));
+                }
+
+                // the reference type comes from the first element whose type CAN be inferred.
+                // empty sub-arrays are skipped because they fit any array type (the spec says so, and I made it up),
+                // which is what makes `var list: array[array[int]] = [[], []];` and `[[1], []]` legal.
+                // if every element is an empty array, there's nothing to check against
+                if let Some(expected) = values.iter().find_map(|v| infer_type(v).ok())
+                    && let Some(i) = values
+                        .iter()
+                        .position(|v| !value_matches_type(v, &expected))
+                {
+                    return Err(elements[i].error(format!(
+                        "Array elements must have the same type, found {} and {}.",
+                        expected,
+                        value_type_name(&values[i])
+                    )));
                 }
                 // array is also a heap-allocated type, same thing as str
                 Ok(Value::Array(Rc::new(values)))
@@ -84,7 +97,7 @@ impl Interpreter {
         match (op, val) {
             (UnaryOp::Neg, Value::Int(n)) => n.checked_neg().map(Value::Int).ok_or_else(|| {
                 operand.error(format!(
-                    "integer overflow: -({}) cannot be represented as int",
+                    "Integer overflow: -({}) cannot be represented as int.",
                     n
                 ))
             }),
@@ -143,10 +156,17 @@ impl Interpreter {
         let right = self.eval(r, env)?;
 
         use BinaryOp::*;
+
+        // errors normally point at the left operand (which is also where the whole expression starts),
+        // but for `x / 0` the culprit is clearly the zero, so the caret should point there to avoid confusion
+        let blame_right = matches!(op, Div | Mod)
+            && matches!(left, Value::Int(_) | Value::Float(_))
+            && (matches!(right, Value::Int(0)) || matches!(right, Value::Float(f) if f == 0.0));
+
         match op {
             Add | Sub | Mul | Div | Pow | Mod => self
                 .eval_arithmetic(op, left, right)
-                .map_err(|e| l.error(e)),
+                .map_err(|e| if blame_right { r.error(e) } else { l.error(e) }),
             Eq | NotEq | Lt | Gt | LtEq | GtEq => self
                 .eval_comparison(op, left, right)
                 .map_err(|e| l.error(e)),
@@ -156,7 +176,7 @@ impl Interpreter {
         }
     }
 
-    /// just an arithmetic helper: takes values, returns a value or a plain error String.
+    /// just an arithmetic helper that: takes values, returns a value or a plain error String.
     /// integer arithmetic stays checked all the way through, including negation/division edge cases,
     /// so bad imi arithmetic becomes a LangError instead of a Rust panic.
     pub(super) fn eval_arithmetic(
@@ -239,20 +259,20 @@ impl Interpreter {
 
         let overflow = || {
             format!(
-                "integer overflow: {} {:?} {} cannot be represented as int.",
+                "Integer overflow: {} {} {} cannot be represented as int.",
                 a, op, b
             )
         };
 
         match op {
-            Add => a.checked_add(b).ok_or_else(|| overflow()),
-            Sub => a.checked_sub(b).ok_or_else(|| overflow()),
-            Mul => a.checked_mul(b).ok_or_else(|| overflow()),
+            Add => a.checked_add(b).ok_or_else(overflow),
+            Sub => a.checked_sub(b).ok_or_else(overflow),
+            Mul => a.checked_mul(b).ok_or_else(overflow),
             Div => {
                 if b == 0 {
                     return Err("Division by zero is not allowed.".to_string());
                 }
-                a.checked_div(b).ok_or_else(|| overflow())
+                a.checked_div(b).ok_or_else(overflow)
             }
             Mod => {
                 if b == 0 {
@@ -275,9 +295,9 @@ impl Interpreter {
 
                 // checked_pow wants u32. converting explicitly avoids exponent truncation.
                 let exp = u32::try_from(b).map_err(|_| {
-                    format!("integer exponent {} is too large (max {}).", b, u32::MAX)
+                    format!("Integer exponent {} is too large (max {}).", b, u32::MAX)
                 })?;
-                a.checked_pow(exp).ok_or_else(|| overflow())
+                a.checked_pow(exp).ok_or_else(overflow)
             }
             _ => unreachable!("yo idk bro, check line 588"),
         }
@@ -347,7 +367,7 @@ impl Interpreter {
 
             _ => {
                 return Err(format!(
-                    "cannot compare {} and {}",
+                    "Cannot compare {} and {}.",
                     type_name(&left),
                     type_name(&right)
                 ));

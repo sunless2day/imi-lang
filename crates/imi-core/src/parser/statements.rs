@@ -167,12 +167,16 @@ impl Parser {
         let col = self.current_col();
         let name = self.expect_ident()?;
 
-        // the list lives in the evaluator now, so this can never drift out of sync
+        // the list lives in the evaluator now, so this can never drift out of sync... or so I believe
         if BUILTINS.contains(&name.as_str()) {
-            return Err(self.current_span().error(format!(
-                "'{}' is a reserved built-in function name and cannot be redeclared",
-                name
-            )));
+            return Err(LangError::new(
+                line,
+                col,
+                format!(
+                    "'{}' is a reserved built-in function name and cannot be redeclared.",
+                    name
+                ),
+            ));
         }
 
         self.expect(&Token::LParen, "Expected '(' after function name.")?;

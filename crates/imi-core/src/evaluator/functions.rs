@@ -95,7 +95,7 @@ impl Interpreter {
         // their parameters. (recursion still works because the FnTable lives on
         // the Interpreter, not inside any Environment)
         let mut call_env = Environment::new();
-        for (param, value) in entry.params.iter().zip(arg_values.into_iter()) {
+        for (param, value) in entry.params.iter().zip(arg_values) {
             // int -> float coercion at the parameter boundary, had to add this atp
             let value = coerce_value_to_type(value, &param.ty);
             if !value_matches_type(&value, &param.ty) {

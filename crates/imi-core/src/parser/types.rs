@@ -32,7 +32,7 @@ impl Parser {
             other => Err(LangError::new(
                 self.current_line(),
                 self.current_col(),
-                format!("Expected a type, found {:?}.", other),
+                format!("Expected a type, found {}.", other),
             )),
             // in case the function failed to parse the type, we simply raise a `LangError` explaining what caused it
         }

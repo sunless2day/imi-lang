@@ -1,0 +1,46 @@
+// an implementation of the popular Sieve of Eratosthenes in imi-lang
+fn primes(n: int) -> array[int] {
+    if n < 2 {
+        let empty_arr: array[int] = [];
+        return empty_arr;
+    }
+
+    var is_prime: array[int] = [];
+    var i = 0;
+    while i <= n {
+        is_prime.push(1);
+        i += 1;
+    }
+
+    is_prime[0] = 0;
+    is_prime[1] = 0;
+
+    var p = 2;
+    while p * p <= n {
+        if is_prime[p] == 1 {
+            var multiplier = p * p;
+            while multiplier <= n {
+                is_prime[multiplier] = 0;
+                multiplier += p;
+            }
+        }
+        p += 1;
+    }
+
+    var primes: array[int] = [];
+    var current_num = 2;
+    while current_num <= n {
+        if is_prime[current_num] == 1 {
+            primes.push(current_num);
+        }
+        current_num += 1;
+    }
+
+    return primes;
+}
+
+let n = 100;
+
+let result_primes = primes(n);
+
+println("primes up to {}: {}", n, result_primes);

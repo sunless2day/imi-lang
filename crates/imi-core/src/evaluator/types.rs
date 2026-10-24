@@ -65,22 +65,23 @@ pub(super) fn infer_type(v: &Value) -> Result<Type, String> {
         Value::Str(_) => Ok(Type::Str),
         Value::Bool(_) => Ok(Type::Bool),
         Value::Array(items) => {
-            let Some(first) = items.first() else {
+            // same rule as array literals: empty sub-arrays fit any array type,
+            // so the element type comes from the first element that has an inferable type.
+            // `[[1], []]` infers array[array[int]], while `[]` and `[[], []]` still can't be inferred
+            let Some(element_type) = items.iter().find_map(|item| infer_type(item).ok()) else {
                 return Err("Cannot infer the element type of an empty array literal. Give it an explicit type, e.g. 'var x: array[int] = [];'"
                     .to_string());
             };
 
-            let element_type = infer_type(first)?;
-
-            for item in &items[1..] {
-                let item_type = infer_type(item)?;
-
-                if item_type != element_type {
-                    return Err(format!(
-                        "Array elements must have the same type, found {} and {}.",
-                        element_type, item_type
-                    ));
-                }
+            if let Some(bad) = items
+                .iter()
+                .find(|item| !value_matches_type(item, &element_type))
+            {
+                return Err(format!(
+                    "Array elements must have the same type, found {} and {}.",
+                    element_type,
+                    value_type_name(bad)
+                ));
             }
 
             Ok(Type::Array(Box::new(element_type)))

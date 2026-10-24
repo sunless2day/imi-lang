@@ -116,7 +116,7 @@ impl Environment {
                         line,
                         col,
                         format!(
-                            "cannot assign {} to '{}'. It was declared as {}.",
+                            "Cannot assign {} to '{}'. It was declared as {}.",
                             type_name(&value),
                             name,
                             binding.ty
@@ -136,7 +136,7 @@ impl Environment {
                         line,
                         col,
                         format!(
-                            "cannot assign {} to '{}'. It was declared as {}.",
+                            "Cannot assign {} to '{}'. It was declared as {}.",
                             type_name(&value),
                             name,
                             binding.ty

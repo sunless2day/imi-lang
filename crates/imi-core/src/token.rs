@@ -69,6 +69,71 @@ pub enum Token {
     Eof,
 }
 
+/// real pain to write.
+/// before this existed, I relied on rust's {:?} and leaked names for things,
+/// like "found RBrace" or "found Ident("x")". now it's "found '}'" and "found identifier 'x'"
+impl std::fmt::Display for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let s = match self {
+            Token::Int(n) => return write!(f, "'{}'", n),
+            Token::Float(x) => return write!(f, "'{}'", x),
+            Token::Str(s) => return write!(f, "string \"{}\"", s),
+            Token::Ident(name) => return write!(f, "identifier '{}'", name),
+            Token::Eof => return write!(f, "end of file"),
+            Token::Let => "let",
+            Token::Var => "var",
+            Token::Fn => "fn",
+            Token::Return => "return",
+            Token::If => "if",
+            Token::Else => "else",
+            Token::While => "while",
+            Token::Continue => "continue",
+            Token::Break => "break",
+            Token::And => "and",
+            Token::Or => "or",
+            Token::Not => "not",
+            Token::True => "true",
+            Token::False => "false",
+            Token::Array => "array",
+            Token::KwInt => "int",
+            Token::KwFloat => "float",
+            Token::KwStr => "str",
+            Token::KwBool => "bool",
+            Token::Plus => "+",
+            Token::Minus => "-",
+            Token::Star => "*",
+            Token::Slash => "/",
+            Token::Caret => "^",
+            Token::Percent => "%",
+            Token::Eq => "=",
+            Token::EqEq => "==",
+            Token::BangEq => "!=",
+            Token::Lt => "<",
+            Token::Gt => ">",
+            Token::LtEq => "<=",
+            Token::GtEq => ">=",
+            Token::PlusEq => "+=",
+            Token::MinusEq => "-=",
+            Token::StarEq => "*=",
+            Token::SlashEq => "/=",
+            Token::CaretEq => "^=",
+            Token::PercentEq => "%=",
+            Token::LParen => "(",
+            Token::RParen => ")",
+            Token::LBrace => "{",
+            Token::RBrace => "}",
+            Token::LBracket => "[",
+            Token::RBracket => "]",
+            Token::Comma => ",",
+            Token::Colon => ":",
+            Token::Semicolon => ";",
+            Token::Arrow => "->",
+            Token::Dot => ".",
+        };
+        write!(f, "'{}'", s)
+    }
+}
+
 /// The interpreter must keep track of which line and column it is in the code to notify errors clearly
 #[derive(Debug, Clone)]
 pub struct Spanned<T> {

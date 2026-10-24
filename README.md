@@ -9,11 +9,12 @@ imi is a very simple and minimal language following a procedural and imperative 
 
 here is a little about imi as a language:
 
-* statically typed but leans heavily on type inference, think of it like the `auto` keyword in C++ or Rust's native type inference
-* it was a pain to implement
-* it's **NOT** blazingly fast🚫🚀⚡
+* (not so) statically typed but leans heavily on type inference, think of it like the `auto` keyword in C23
+* ~it was~ still is a pain to implement
+* it is **NOT** blazingly fast🚫🚀⚡
 * functions and variables live in separate namespaces, so a function and a variable can share a name without ever colliding
 * if you're used to Rust the syntax will feel familiar
+* easy to learn (or so I hope)
 
 ## Installation
 
@@ -41,7 +42,7 @@ export PATH="$PATH:$HOME/.cargo/bin"
 
 if you're on on a Windows (or non-POSIX compliant) system, figure it out yourself.
 
-***
+---
 
 everything you need to know about the language lives in the spec that's part of this repository. I recommend reading it if you want the details of every single thing. everything past below this is just a summary of what imi-lang contains and is capable of.
 
@@ -84,7 +85,7 @@ the operating system uses the shebang to launch `imi`, and the interpreter ignor
 
 ## Built-in functions
 
-these can't be overridden by user-declared functions (will produce a runtime error).
+these can't be overridden by user-declared functions (that's an error before the program even runs).
 
 | Function   | What it does                                                                                                                                                                                                                                                                                                                 |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -101,6 +102,8 @@ these can't be overridden by user-declared functions (will produce a runtime err
 | `exit`     | stops the program right there. takes an optional `int` between 0 and 255 as the exit code, 0 if you don't give one                                                                                                                                                                                                           |
 | `fread`    | reads a whole file and returns its contents as a `str`. if the file can't be read for any reason, that terminates the program with an explanation of what went wrong                                                                                                                                                         |
 | `fwrite`   | writes a str to a file. takes a third argument, "o" to overwrite the file or "a" to append to it, no default, you have to pick one (e.g. `fwrite("path/to/file", "hello, from imi!", "o");`). either mode creates the file if it doesn't exist. same deal as `fread`, any failure terminates the program with an explanation |
+
+note for `fread` and `fwrite`: relative paths are relative to the directory you run `imi` from, not the directory the `.imi` file lives in. so `imi scripts/foo.imi` doing `fread("notes.txt")` looks for `./notes.txt`, not `scripts/notes.txt`. absolute paths work too.
 
 ahead are some examples of what imi can do and how it is implemented
 
@@ -228,6 +231,13 @@ var e: array[int] = []; // fine
 var f = [];              // ERROR, can't infer the type
 ```
 
+empty arrays nested inside another array are fine though, they fit any array type, so the other elements decide.
+
+```rust
+var g: array[array[int]] = [[], []]; // fine
+var h = [[1, 2], []];                // array[array[int]]
+```
+
 ## Doing some simple math
 
 imi has all the arithmetic operators you'd expect.
@@ -291,7 +301,9 @@ println("{}", -5 ^ 2);   // -25
 println("{}", (-5) ^ 2); // 25
 ```
 
-there's no unary `+` either, writing `+5` isn't valid syntax.
+minus signs can't be stacked either, `--5` is an error. write `-(-5)` like you would in math. (`2 - -3` is fine, that's just a subtraction followed by a negative number)
+
+also there's no unary `+`, writing `+5` isn't valid syntax.
 
 ## Control Flow
 
@@ -373,6 +385,8 @@ println("Hello, {}!", name);
 ```
 
 note: the first argument to `print`/`println`/`format` must be a string literal. using a string variable, or any other kind of expression, is illegal on purpose. keep that in mind.
+
+and just like rust, `{}` is the only placeholder. values always go in as arguments, so `println("{name}");` is an error, not a way to print `name`. a stray `{` or `}` is an error too, write `{{` or `}}` if you want a literal brace.
 
 ### A very simple calculator
 
@@ -505,8 +519,20 @@ this is **copy-on-write**. earlier, heap-backed values were eagerly cloned whene
 
 arrays use the same idea, including nested arrays. from the language's point of view nothing changed: assignment and function arguments still have value semantics, and mutating one copied value can never mutate another one by accident.
 
+### nicer error messages
+
+errors now show the line they happened on, with a `^` under the spot that caused it:
+
+```text
+error at line 2, column 16: Division by zero is not allowed.
+2 |     return a / 0;
+  |                ^
+```
+
+I programmed it so the red/green coloring only shows up when the error is printed to a terminal. redirect stderr to a file or pipe it into another program and you get plain text instead. set the `NO_COLOR` environment variable if you never want colors [(thank whoever this is)](https://no-color.org/).
+
 ## What imi can't do (I suppose)
 
-honestly, not much comes to mind. it's turing complete after all.
+honestly, not much comes to mind. it's turing complete after all. you probably won't be able to write the next big thing with it, for sure.
 
-I did wonder if anyone would ever implement imi-lang in imi-lang if `fread()` was ever added to the language. well, `fread()` and `fwrite()` are both a thing now, so that joke's on me.
+although, I did wonder if anyone would ever implement imi-lang in imi-lang if `fread()` was ever added to the language. well, `fread()` and `fwrite()` are both a thing now, so that joke's on me.

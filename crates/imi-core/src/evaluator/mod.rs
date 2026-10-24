@@ -21,10 +21,13 @@ use std::rc::Rc;
 use std::time::Instant;
 
 /// how deep user recursion is allowed to go.
-/// conservative on purpose: each call in imi costs a surprising amount of rust stack
+/// (not so) conservative (anymore) on purpose: each call in imi costs a surprising amount of rust stack
 /// (eval() itself recurses for every subexpression), and past this limit I'd rather
 /// report a clean error than let the process die with a native stack overflow
-const MAX_CALL_DEPTH: usize = 512;
+///
+/// the stack went from 8MB to 256MB (32x), but I'm growing the limit to 25x
+/// in order to leave some headroom for functions that use more stack per call
+const MAX_CALL_DEPTH: usize = 512 * 25;
 
 /// how statements report control flow to whoever called them.
 /// instead of unwinding the rust stack for break/continue/return, every statement

@@ -1,3 +1,5 @@
+//! exposes a very straight-forward, callable function that interprets any valid imi-lang code
+
 mod ast;
 mod environment;
 mod error;
@@ -6,7 +8,10 @@ mod lexer;
 mod parser;
 mod token;
 
-use crate::{error::LangError, evaluator::Interpreter, lexer::Lexer, parser::Parser};
+use crate::{evaluator::Interpreter, lexer::Lexer, parser::Parser};
+
+// main needs the error's fields (line, col, ...) to print the right source line
+pub use crate::error::LangError;
 
 /// simply initializes and runs each component in the interpreter.
 /// it receives the source code as plain text and passes it through the lexer,
@@ -17,9 +22,9 @@ use crate::{error::LangError, evaluator::Interpreter, lexer::Lexer, parser::Pars
 /// any other error from any stage of the interpreter (be it the lexer, parser or actual runtime)
 /// is bubbled up to the caller (which is the main function)
 pub fn run(code: &str) -> Result<(), LangError> {
-    let tokens = Lexer::new(&code).tokenize()?;
-    let program = Parser::new(tokens).parse()?;
-    Interpreter::new().interpret(&program)?;
+    let tokens = Lexer::new(code).tokenize()?;
+    let ast = Parser::new(tokens).parse()?;
+    Interpreter::new().interpret(&ast)?;
 
     Ok(())
 }

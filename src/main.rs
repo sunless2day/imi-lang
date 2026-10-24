@@ -1,7 +1,17 @@
-//! I doubt there is much to say about this module
-//! it just uses the exposed `run()` function from the library crate
+//! I doubt there is much to say about this module || SCREW THAT
+//! new changes added. now main does more than just call the run function!
 
-use std::{env::args, fs, process::ExitCode};
+mod report;
+
+use report::report;
+use std::{env::args, fs, process::ExitCode, thread};
+
+/// the interpreter is a tree-walker, so every nested call/block/expression requires real rust stack.
+/// the main thread only gets around 8MB of stack memory, which may seem like enough for most use cases
+/// but will crash the moment you try to execute a larger file or one that gobbles a lot of stack memory,
+/// so... the fix? the interpreter runs on its own thread with a much bigger stack.
+/// (this memory is only reserved, the OS doesn't actually hand it out until it's touched)
+const INTERPRETER_STACK_SIZE: usize = 256 * 1024 * 1024;
 
 /// I tried to keep the main function as minimal as possible.
 /// it collects the CLI arguments and ensures there is only one (except the program itself).
@@ -10,7 +20,7 @@ use std::{env::args, fs, process::ExitCode};
 /// if the given argument matches the requirements (one single .imi file),
 /// then it will try to open the file and read its contents (exits if it fails to read the file),
 /// if we get past everything without an error, then the source code (read from the file) will be
-/// passed to the `imi_core::run()` function from the library crate
+/// passed to the `imi_core::run()` function from the library crate, on a thread with a BIG stack
 fn main() -> ExitCode {
     let args: Vec<String> = args().skip(1).collect();
 
@@ -26,7 +36,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
         None => {
-            eprintln!("usage: imi <file>");
+            eprintln!("usage: imi <file.imi>");
             return ExitCode::FAILURE;
         }
     };
@@ -39,10 +49,35 @@ fn main() -> ExitCode {
         }
     };
 
+    // I initially thought of cloning the source so the interpreter thread would get its own copy,
+    // but a scoped thread is guaranteed to finish before `thread::scope` returns,
+    // so it can borrow `code` without the compiler bitching about it.
+    // main still owns the source afterwards, to show the offending line if an error shows up
+    let spawned = thread::scope(|s| {
+        thread::Builder::new()
+            .name("imi".into())
+            .stack_size(INTERPRETER_STACK_SIZE)
+            // safely borrowing the source:
+            .spawn_scoped(s, || imi_core::run(&code))
+            // keep in mind that I'm joining by hand, so if the thread panicked
+            // we get to handle that error below instead of the scope re-panicking on its way out
+            .map(|handle| handle.join())
+    });
+
+    let result = match spawned {
+        Ok(Ok(result)) => result,
+        // the thread panicked, I trust rust to have already printed the error message
+        Ok(Err(_)) => return ExitCode::FAILURE,
+        Err(e) => {
+            eprintln!("failed to start the interpreter: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
     // if at any point the interpreter raises an error,
     // the main function prints it to stderr and exits the program
-    if let Err(e) = imi_core::run(&code) {
-        eprintln!("\n{}", e);
+    if let Err(e) = result {
+        report(&e, &code);
         return ExitCode::FAILURE;
     }
 
