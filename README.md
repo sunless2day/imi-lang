@@ -524,8 +524,8 @@ arrays use the same idea, including nested arrays. from the language's point of 
 errors now show the line they happened on, with a `^` under the spot that caused it:
 
 ```text
-error at line 2, column 16: Division by zero is not allowed.
-2 |     return a / 0;
+error at line x, column y: Division by zero is not allowed.
+x |     return a / 0;
   |                ^
 ```
 
