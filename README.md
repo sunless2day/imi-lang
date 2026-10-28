@@ -3,6 +3,8 @@
   <h1>imi-lang</h1>
 </div>
 
+logo credits to: @metanokia
+
 *this is part of yet another school project...*
 
 imi is a very simple and minimal language following a procedural and imperative paradigm.
