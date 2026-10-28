@@ -1,6 +1,6 @@
 # Language Specification
 
-A small interpreted programming language, implemented in Rust as part of a high school diploma project.
+A small, interpreted programming language: imi-lang.
 
 ## 1. Variable Declarations
 
